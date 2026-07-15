@@ -1,23 +1,19 @@
 # cargo-tester
 
-![banner](./assets/test.png)
-
 `cargo-tester` es un subcomando de Cargo para ejecutar tests de Rust y convertir
 sus resultados en una salida clara, medible y útil tanto en terminal como en CI.
 
-![details](./assets/details.png)
-
-```text
-┌────┬───────────────────┬──────────────┬──────────────────────────┬────────┬───────┐
-│ ID ┆ Path              ┆ Family       ┆ Test                     ┆ Status ┆ Time  │
-╞════╪═══════════════════╪══════════════╪══════════════════════════╪════════╪═══════╡
-│ #1 ┆ tests/parser.rs   ┆ parser_tests ┆ parses_a_valid_document  ┆ PASS   ┆ 12 ms │
-├╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┤
-│ #2 ┆ tests/runner.rs   ┆ runner_tests ┆ rejects_invalid_results  ┆ FAIL   ┆ 28 ms │
-└────┴───────────────────┴──────────────┴──────────────────────────┴────────┴───────┘
-
-1 passed · 1 failed · 0 ignored · Total: 40 ms
 ```
+cargo tester
+```
+
+![banner](./assets/test.png)
+
+```
+cargo tester --details
+```
+
+![details](./assets/details.png)
 
 ## Características
 
