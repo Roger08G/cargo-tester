@@ -1,0 +1,34 @@
+name: Propuesta de mejora
+description: Propón una mejora concreta para cargo-tester.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema
+      description: Explica qué flujo de trabajo no puede resolverse bien actualmente.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Solución propuesta
+      description: Describe la interfaz, configuración o salida que esperas.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Alcance
+      options:
+        - label: La propuesta mantiene a cargo-tester como subcomando de Cargo.
+          required: true

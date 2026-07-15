@@ -1,0 +1,27 @@
+[output]
+color = true
+unicode = true
+emoji = true
+solution = true
+output-path = ".cargo/tester-output/"
+show-passed = true
+show-failed = true
+show-ignored = true
+
+[execution]
+jobs = 0
+
+[timing]
+slow-threshold = "1s"
+very-slow-threshold = "5s"
+
+[history]
+enabled = true
+max-runs = 50
+show-runs-history = 20
+regression-threshold-percent = 50
+minimum-test-duration = "100ms"
+
+[groups.sandbox]
+patterns = ["sandbox::tests::*"]
+sequential = true

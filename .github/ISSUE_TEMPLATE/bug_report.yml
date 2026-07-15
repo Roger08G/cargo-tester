@@ -1,0 +1,64 @@
+name: Informe de error
+description: Informa de un comportamiento reproducible de cargo-tester.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Gracias por dedicar tiempo a preparar un informe reproducible.
+
+  - type: input
+    id: version
+    attributes:
+      label: Versión
+      description: Salida de `cargo tester --version`.
+      placeholder: cargo-tester 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Entorno
+      description: Sistema operativo, versión de Rust y terminal.
+      placeholder: Windows 11, rustc 1.85.0, PowerShell 7
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Pasos para reproducirlo
+      description: Incluye el comando exacto y una configuración mínima.
+      placeholder: |
+        1. Crear tester.toml con...
+        2. Ejecutar cargo tester...
+        3. Observar...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Resultado esperado
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Resultado actual
+      description: Adjunta `summary.txt` o `details.json` después de eliminar datos sensibles.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Comprobaciones
+      options:
+        - label: He buscado informes existentes sobre este problema.
+          required: true
+        - label: He eliminado secretos y rutas sensibles de los reportes adjuntos.
+          required: true
