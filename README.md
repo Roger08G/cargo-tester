@@ -3,13 +3,17 @@
 `cargo-tester` es un subcomando de Cargo para ejecutar tests de Rust y convertir
 sus resultados en una salida clara, medible y útil tanto en terminal como en CI.
 
-```
+Ejecutar los tests:
+
+```console
 cargo tester
 ```
 
 ![banner](./assets/test.png)
 
-```
+Ver los detalles de los tests fallidos:
+
+```console
 cargo tester --details
 ```
 
