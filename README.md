@@ -13,8 +13,8 @@
   <a href="https://github.com/Roger08G/cargo-tester/releases"><img src="https://img.shields.io/github/v/release/Roger08G/cargo-tester?display_name=tag&sort=semver" alt="Versión"></a>
   <a href="https://github.com/Roger08G/cargo-tester/stargazers"><img src="https://img.shields.io/github/stars/Roger08G/cargo-tester?style=flat" alt="Estrellas"></a>
   <a href="https://github.com/Roger08G/cargo-tester/network/members"><img src="https://img.shields.io/github/forks/Roger08G/cargo-tester?style=flat" alt="Forks"></a>
-  <!--<img src="https://img.shields.io/badge/Rust-1.97%2B-orange?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=20232A" alt="React">
+  <img src="https://img.shields.io/badge/Rust-1.85%2B-orange?logo=rust" alt="Rust">
+  <!--<img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=20232A" alt="React">
   <img src="https://img.shields.io/badge/Android-API%2024%2B-3DDC84?logo=android&logoColor=white" alt="Android">-->
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Roger08G/cargo-tester" alt="Licencia"></a>
 </p>
