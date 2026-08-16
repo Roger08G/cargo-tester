@@ -1,4 +1,23 @@
-# cargo-tester
+<!--<p align="center">
+  <img src="./images/ico.png" alt="ico" width="190">
+</p>-->
+
+<h1 align="center">Cargo Tester</h1>
+
+<p align="center">
+  Subcomando de Cargo para ejecutar tests de Rust más eficientes.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Roger08G/cargo-tester/actions/workflows/ci.yml"><img src="https://github.com/Roger08G/cargo-tester/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Roger08G/cargo-tester/releases"><img src="https://img.shields.io/github/v/release/Roger08G/cargo-tester?display_name=tag&sort=semver" alt="Versión"></a>
+  <a href="https://github.com/Roger08G/cargo-tester/stargazers"><img src="https://img.shields.io/github/stars/Roger08G/cargo-tester?style=flat" alt="Estrellas"></a>
+  <a href="https://github.com/Roger08G/cargo-tester/network/members"><img src="https://img.shields.io/github/forks/Roger08G/cargo-tester?style=flat" alt="Forks"></a>
+  <!--<img src="https://img.shields.io/badge/Rust-1.97%2B-orange?logo=rust" alt="Rust">
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=20232A" alt="React">
+  <img src="https://img.shields.io/badge/Android-API%2024%2B-3DDC84?logo=android&logoColor=white" alt="Android">-->
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Roger08G/cargo-tester" alt="Licencia"></a>
+</p>
 
 `cargo-tester` es un subcomando de Cargo para ejecutar tests de Rust y convertir
 sus resultados en una salida clara, medible y útil tanto en terminal como en CI.
