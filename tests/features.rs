@@ -150,7 +150,6 @@ mod config_features {
             color = true
             unicode = true
             emoji = true
-            solution = true
             "#,
         )
         .unwrap();
@@ -160,7 +159,6 @@ mod config_features {
         assert!(!config.output.color);
         assert!(!config.output.unicode);
         assert!(!config.output.emoji);
-        assert!(config.output.solution);
     }
 }
 

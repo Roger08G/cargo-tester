@@ -17,9 +17,3 @@ pub(crate) fn source_path(file: &str, line: Option<usize>) -> String {
 pub(crate) fn function_signature(source_line: &str) -> String {
     source_line.trim().trim_end_matches('{').trim().to_owned()
 }
-
-pub(crate) fn display_width(text: &str) -> usize {
-    text.chars()
-        .map(|character| if character.is_ascii() { 1 } else { 2 })
-        .sum()
-}

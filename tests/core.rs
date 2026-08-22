@@ -71,7 +71,6 @@ mod config_tests {
 
         assert!(config.output.color);
         assert!(!config.output.emoji);
-        assert!(!config.output.solution);
         assert!(config.output.unicode);
         assert_eq!(
             config.output.output_path,
@@ -88,7 +87,6 @@ mod config_tests {
             [output]
             color = false
             emoji = true
-            solution = true
             unicode = false
             output-path = "target/custom-tester-output"
 
@@ -101,7 +99,6 @@ mod config_tests {
 
         assert!(!config.output.color);
         assert!(config.output.emoji);
-        assert!(config.output.solution);
         assert!(!config.output.unicode);
         assert_eq!(
             config.output.output_path,
@@ -152,9 +149,17 @@ mod config_tests {
             "#,
         )
         .expect_err("empty output paths should fail");
+        let removed_solution = TesterConfig::parse(
+            r#"
+            [output]
+            solution = true
+            "#,
+        )
+        .expect_err("removed solution setting should fail");
 
         assert!(unknown.to_string().contains("unknown field"));
         assert!(empty_path.to_string().contains("output-path"));
+        assert!(removed_solution.to_string().contains("unknown field"));
     }
 
     #[test]
@@ -164,7 +169,6 @@ mod config_tests {
             [output]
             color = true
             emoji = true
-            solution = true
             unicode = true
             "#,
         )
@@ -175,7 +179,6 @@ mod config_tests {
         assert!(!plain.output.color);
         assert!(!plain.output.emoji);
         assert!(!plain.output.unicode);
-        assert!(plain.output.solution);
         assert!(config.output.color, "original config must remain unchanged");
     }
 
@@ -385,32 +388,7 @@ mod reporter_tests {
             .expect("emoji failed tests should render details");
 
         assert!(emoji_details.contains("[#2] \u{1F9EA} fails_when_expected_patch_is_missing"));
-
-        let mut solution_config = config.clone();
-        solution_config.output.solution = true;
-        let solution_details = render_failure_details(&results, &solution_config)
-            .expect("solution failed tests should render details");
-
-        assert!(solution_details.contains("Posible solucion:"));
-        assert!(!solution_details.contains("\u{1F4A1}"));
-        assert!(solution_details.contains("tests/example.rs:L45"));
-
-        let mut colored_solution_config = config.clone();
-        colored_solution_config.output.color = true;
-        colored_solution_config.output.solution = true;
-        let colored_solution_details = render_failure_details(&results, &colored_solution_config)
-            .expect("colored solution should render details");
-
-        assert!(colored_solution_details.contains("\x1b[3;32mPosible solucion:"));
-
-        let mut emoji_solution_config = config.clone();
-        emoji_solution_config.output.emoji = true;
-        emoji_solution_config.output.solution = true;
-        let emoji_solution_details = render_failure_details(&results, &emoji_solution_config)
-            .expect("emoji solution should render details");
-
-        assert!(emoji_solution_details.contains("| \u{1F4A1} Posible solucion:"));
-        assert!(emoji_solution_details.contains("\n|    "));
+        assert!(!details.contains("Posible solucion:"));
 
         write_details_json(&results, Duration::from_millis(25), &root)
             .expect("details json should be written");
@@ -433,7 +411,7 @@ mod reporter_tests {
             "tests/example.rs:L42"
         );
         assert_eq!(json["failed"][0]["panic"]["line"], 45);
-        assert_eq!(json["schema_version"], 2);
+        assert_eq!(json["schema_version"], 3);
         assert_eq!(json["summary"]["total"], 2);
         assert_eq!(json["summary"]["failed"], 1);
         assert_eq!(json["summary"]["successful"], false);
@@ -448,7 +426,8 @@ mod reporter_tests {
             json["failed"][0]["rerun"]["cargo_tester"],
             "cargo tester sandbox::tests::fails_when_expected_patch_is_missing"
         );
-        assert!(json["failed"][0]["solution_details"].is_object());
+        assert!(json["failed"][0].get("solution").is_none());
+        assert!(json["failed"][0].get("solution_details").is_none());
         assert!(json["failed"][0]["panic"]["source_context"].is_array());
         assert!(
             json["tests"]
@@ -462,8 +441,8 @@ mod reporter_tests {
     }
 
     #[test]
-    fn details_json_includes_actionable_solution_details() {
-        let root = create_temp_project("solution_details");
+    fn details_json_includes_objective_assertion_details() {
+        let root = create_temp_project("assertion_details");
         let results = vec![assert_eq_failed_result(1)];
 
         write_details_json(&results, Duration::from_millis(8), &root)
@@ -475,23 +454,11 @@ mod reporter_tests {
             serde_json::from_str(&json).expect("details json should be valid");
         let failed = &json["failed"][0];
 
-        assert_eq!(failed["solution_details"]["category"], "assert_eq_mismatch");
-        assert_eq!(failed["solution_details"]["confidence"], "high");
-        assert!(
-            failed["solution"]
-                .as_str()
-                .unwrap()
-                .contains("Valor real: `2`; esperado: `3`")
-        );
+        assert_eq!(failed["assertion"]["kind"], "assert_eq");
         assert_eq!(failed["assertion"]["left"], "2");
         assert_eq!(failed["assertion"]["right"], "3");
-        assert!(
-            failed["solution_details"]["action_items"]
-                .as_array()
-                .expect("action items should be an array")
-                .len()
-                >= 3
-        );
+        assert!(failed.get("solution").is_none());
+        assert!(failed.get("solution_details").is_none());
 
         fs::remove_dir_all(root).expect("temp project should be removed");
     }

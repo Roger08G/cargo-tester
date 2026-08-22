@@ -2,7 +2,6 @@
 color = true
 unicode = true
 emoji = true
-solution = true
 output-path = ".cargo/tester-output/"
 show-passed = true
 show-failed = true

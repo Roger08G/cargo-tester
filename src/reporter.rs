@@ -1,4 +1,5 @@
 mod ci;
+mod context;
 mod details;
 mod history;
 mod json;

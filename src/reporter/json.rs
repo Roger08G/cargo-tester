@@ -8,17 +8,22 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::{
-    diagnostics::{
-        AssertionDetails, FailureDiagnosis, SourceContextLine, analyze_failure,
-        parse_assertion_details, source_context_at, source_line_at,
-    },
     formatting,
     runner::{PanicDetails, TestResult, TestStatus},
 };
 
-use super::{DETAILS_FILE_NAME, details_path, table::status_counts, write_output_file};
+use super::{
+    DETAILS_FILE_NAME,
+    context::{
+        AssertionDetails, SourceContextLine, parse_assertion_details, source_context_at,
+        source_line_at,
+    },
+    details_path,
+    table::status_counts,
+    write_output_file,
+};
 
-const SCHEMA_VERSION: u8 = 2;
+const SCHEMA_VERSION: u8 = 3;
 const SOURCE_CONTEXT_RADIUS: usize = 4;
 
 pub fn write_details_json(
@@ -189,8 +194,6 @@ struct FailedTestDetails {
     exit_code: Option<i32>,
     panic: Option<PanicLocation>,
     assertion: Option<AssertionDetails>,
-    solution: Option<String>,
-    solution_details: Option<FailureDiagnosis>,
     captured_output: CapturedOutput,
 }
 
@@ -203,7 +206,6 @@ impl From<&TestResult> for FailedTestDetails {
         let stderr = failure
             .map(|failure| failure.stderr.clone())
             .unwrap_or_default();
-        let solution_details = failure.map(|failure| analyze_failure(result, failure));
 
         Self {
             id: result.id,
@@ -220,10 +222,6 @@ impl From<&TestResult> for FailedTestDetails {
             exit_code: failure.and_then(|failure| failure.exit_code),
             panic: failure.and_then(|failure| failure.panic.as_ref().map(PanicLocation::from)),
             assertion: failure.and_then(parse_assertion_details),
-            solution: solution_details
-                .as_ref()
-                .map(|diagnosis| diagnosis.summary.clone()),
-            solution_details,
             captured_output: CapturedOutput::new(stdout, stderr),
         }
     }

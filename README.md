@@ -40,7 +40,6 @@ cargo tester --details
 - Filtros por nombre, familia, grupo y último resultado fallido.
 - Ejecución paralela configurable con grupos que pueden forzarse a secuencial.
 - Detalles de panic con archivo, línea, función, salida capturada y contexto.
-- Diagnósticos deterministas para fallos comunes de Rust.
 - Historial acotado y detección de regresiones de rendimiento.
 - Reportes persistentes en texto plano y JSON.
 - Salida específica para CI y anotaciones automáticas en GitHub Actions.
@@ -168,7 +167,6 @@ Si no existe ninguno, se utilizan valores seguros por defecto.
 color = true
 unicode = true
 emoji = false
-solution = true
 output-path = ".cargo/tester-output/"
 show-passed = true
 show-failed = true
@@ -203,8 +201,7 @@ sequential = true
 - `color`: activa ANSI cuando stdout es una terminal y `NO_COLOR` no está
   definido.
 - `unicode`: usa bordes Unicode. Los reportes persistentes siempre son ASCII.
-- `emoji`: habilita iconos en recomendaciones y detalles.
-- `solution`: añade una recomendación determinista a cada fallo detallado.
+- `emoji`: habilita iconos en los detalles.
 - `output-path`: directorio donde se guardan los artefactos.
 - `show-passed`, `show-failed`, `show-ignored`: controlan las filas visibles.
 - `max-width`: limita el ancho de la tabla; el mínimo permitido es `60`.
@@ -233,7 +230,7 @@ Una regresión se informa cuando un test que superaba
 `minimum-test-duration` aumenta al menos el porcentaje configurado en
 `regression-threshold-percent`. Solo se comparan ejecuciones correctas.
 
-## Detalles y diagnósticos
+## Detalles de fallos
 
 Con `--details`, cada fallo incluye:
 
@@ -244,14 +241,6 @@ Con `--details`, cada fallo incluye:
 - Aserción detectada y valores comparados cuando están disponibles.
 - Contexto de código alrededor de la línea del fallo.
 - Comandos para repetir el test.
-
-Con `solution = true`, el analizador reconoce aserciones, `Option` y `Result`,
-índices fuera de rango, overflow, división por cero, conflictos de `RefCell`,
-mutex envenenados, canales cerrados, variables de entorno, archivos ausentes,
-snapshots, contratos `should_panic`, stack overflow y código sin implementar.
-
-Las recomendaciones se generan a partir de evidencia observable. Si no existe
-información suficiente, el diagnóstico se marca como genérico.
 
 ## Archivos generados
 
@@ -274,6 +263,8 @@ Con la ruta por defecto:
 
 `details.json` se genera con `--details` o `--ci`. En una ejecución normal se
 elimina para evitar que un reporte antiguo parezca actual.
+El esquema actual es `3` y limita el contenido a datos observados del test y de
+su fallo.
 
 ## Integración continua
 
@@ -322,7 +313,6 @@ src/
 |-- config.rs           Carga y validación de tester.toml
 |-- runner.rs           Descubrimiento y ejecución paralela
 |-- source.rs           Resolución de archivo, función y línea
-|-- diagnostics/        Clasificación determinista de fallos
 |-- history.rs          Historial y regresiones
 |-- state.rs            Estado de la última ejecución
 `-- reporter/           Tabla, detalles, JSON, CI e historial

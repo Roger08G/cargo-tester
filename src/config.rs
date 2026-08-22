@@ -155,7 +155,6 @@ pub struct OutputConfig {
     pub show_failed: bool,
     pub show_ignored: bool,
     pub show_passed: bool,
-    pub solution: bool,
     pub unicode: bool,
     pub output_path: PathBuf,
 }
@@ -169,7 +168,6 @@ impl Default for OutputConfig {
             show_failed: true,
             show_ignored: true,
             show_passed: true,
-            solution: false,
             unicode: true,
             output_path: PathBuf::from(".cargo/tester-output/"),
         }
