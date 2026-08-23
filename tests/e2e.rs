@@ -36,9 +36,12 @@ mod tests {
             .expect("local history should exist"),
     )
     .expect("local history should be valid JSON");
+    let stored_working_directory = local_history["runs"][0]["working_directory"]
+        .as_str()
+        .expect("local working directory should be text");
     assert_eq!(
-        local_history["runs"][0]["working_directory"],
-        fixture.root.display().to_string()
+        fs::canonicalize(stored_working_directory).expect("stored working directory should exist"),
+        fs::canonicalize(&fixture.root).expect("fixture root should exist")
     );
 
     let output = run_tester(&fixture.root, &["--ci"]);
@@ -54,6 +57,7 @@ mod tests {
         &details,
         &fixture.root.display().to_string()
     ));
+    assert!(!json_contains_text(&details, stored_working_directory));
     assert!(!serialized.contains("ci-super-secret-value"));
     assert!(!serialized.contains("ghp_"));
     assert!(details["failed"][0].get("captured_output").is_none());
@@ -69,6 +73,7 @@ mod tests {
     ] {
         let artifact = fs::read_to_string(output_dir.join(name)).expect("CI artifact should exist");
         assert!(!artifact.contains(&fixture.root.display().to_string()));
+        assert!(!artifact.contains(stored_working_directory));
         assert!(!artifact.contains("ci-super-secret-value"));
         assert!(!artifact.contains("ghp_"));
     }
