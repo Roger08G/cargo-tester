@@ -10,12 +10,13 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    config::HistoryConfig,
+    config::{HistoryConfig, PrivacyConfig},
+    persistence::atomic_write,
     runner::{TestResult, TestStatus},
 };
 
 const HISTORY_FILE_NAME: &str = "history.json";
-const SCHEMA_VERSION: u8 = 1;
+const SCHEMA_VERSION: u8 = 2;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TestHistory {
@@ -34,6 +35,8 @@ pub struct RunHistory {
     pub passed: usize,
     pub failed: usize,
     pub ignored: usize,
+    #[serde(default)]
+    pub timed_out: usize,
     pub total_duration_ms: u64,
     pub tests: Vec<TestHistory>,
 }
@@ -76,15 +79,16 @@ impl History {
                 return Err(error).with_context(|| format!("failed to read {}", path.display()));
             }
         };
-        let file: HistoryFile = serde_json::from_str(&contents)
+        let mut file: HistoryFile = serde_json::from_str(&contents)
             .with_context(|| format!("failed to parse {}", path.display()))?;
-        if file.schema_version != SCHEMA_VERSION {
+        if !matches!(file.schema_version, 1 | SCHEMA_VERSION) {
             bail!(
                 "unsupported {} schema version {}",
                 path.display(),
                 file.schema_version
             );
         }
+        file.schema_version = SCHEMA_VERSION;
         Ok(Self { file })
     }
 
@@ -146,19 +150,36 @@ impl History {
         results: &[TestResult],
         total: Duration,
         config: &HistoryConfig,
+        privacy: &PrivacyConfig,
         output_path: &Path,
     ) -> Result<()> {
-        let (passed, failed, ignored) = status_counts(results);
+        if privacy.redact {
+            for run in &mut self.file.runs {
+                run.working_directory = None;
+                run.arguments.clear();
+            }
+        }
+
+        let (passed, failed, ignored, timed_out) = status_counts(results);
         self.file.runs.push(RunHistory {
             generated_at_unix_ms: unix_timestamp_ms(),
-            working_directory: env::current_dir()
-                .ok()
-                .map(|path| path.display().to_string()),
-            arguments: env::args().skip(1).collect(),
+            working_directory: (!privacy.redact)
+                .then(|| {
+                    env::current_dir()
+                        .ok()
+                        .map(|path| path.display().to_string())
+                })
+                .flatten(),
+            arguments: if privacy.redact {
+                Vec::new()
+            } else {
+                env::args().skip(1).collect()
+            },
             total: results.len(),
             passed,
             failed,
             ignored,
+            timed_out,
             total_duration_ms: duration_ms(total),
             tests: results
                 .iter()
@@ -179,23 +200,21 @@ impl History {
     }
 
     fn write(&self, output_path: &Path) -> Result<()> {
-        fs::create_dir_all(output_path)
-            .with_context(|| format!("failed to create {}", output_path.display()))?;
         let path = output_path.join(HISTORY_FILE_NAME);
         let json =
             serde_json::to_string_pretty(&self.file).context("failed to serialize test history")?;
-        fs::write(&path, format!("{}\n", json.trim_end()))
-            .with_context(|| format!("failed to write {}", path.display()))
+        atomic_write(&path, format!("{}\n", json.trim_end()).as_bytes())
     }
 }
 
-fn status_counts(results: &[TestResult]) -> (usize, usize, usize) {
+fn status_counts(results: &[TestResult]) -> (usize, usize, usize, usize) {
     results.iter().fold(
-        (0, 0, 0),
-        |(passed, failed, ignored), result| match result.status {
-            TestStatus::Pass => (passed + 1, failed, ignored),
-            TestStatus::Fail => (passed, failed + 1, ignored),
-            TestStatus::Ignored => (passed, failed, ignored + 1),
+        (0, 0, 0, 0),
+        |(passed, failed, ignored, timed_out), result| match result.status {
+            TestStatus::Pass => (passed + 1, failed, ignored, timed_out),
+            TestStatus::Fail => (passed, failed + 1, ignored, timed_out),
+            TestStatus::Ignored => (passed, failed, ignored + 1, timed_out),
+            TestStatus::Timeout => (passed, failed, ignored, timed_out + 1),
         },
     )
 }

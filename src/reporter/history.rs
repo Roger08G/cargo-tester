@@ -31,6 +31,7 @@ pub fn render_history(history: &History, config: &TesterConfig) -> String {
             "Tests",
             "Passed",
             "Failed",
+            "Timeouts",
             "Ignored",
             "Time",
         ]
@@ -50,6 +51,7 @@ pub fn render_history(history: &History, config: &TesterConfig) -> String {
             Cell::new(run.total),
             Cell::new(run.passed),
             Cell::new(run.failed),
+            Cell::new(run.timed_out),
             Cell::new(run.ignored),
             Cell::new(formatting::duration(Duration::from_millis(
                 run.total_duration_ms,

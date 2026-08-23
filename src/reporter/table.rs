@@ -8,6 +8,7 @@ use comfy_table::{
 use crate::{
     config::TesterConfig,
     formatting,
+    privacy::sanitize_path,
     runner::{TestResult, TestStatus},
 };
 
@@ -48,7 +49,10 @@ pub fn render_report_with_filter(
     {
         table.add_row(vec![
             Cell::new(format!("#{}", result.id)).set_alignment(CellAlignment::Right),
-            muted_cell(&result.file, config.output.color),
+            muted_cell(
+                &sanitize_path(&result.file, config.privacy.redact),
+                config.output.color,
+            ),
             muted_cell(&result.family, config.output.color),
             Cell::new(&result.test),
             status_cell(result.status, config.output.color),
@@ -69,19 +73,21 @@ impl ReportFilter {
                 TestStatus::Pass => config.output.show_passed,
                 TestStatus::Fail => config.output.show_failed,
                 TestStatus::Ignored => config.output.show_ignored,
+                TestStatus::Timeout => config.output.show_failed,
             },
-            Self::FailedOnly => result.status == TestStatus::Fail,
+            Self::FailedOnly => result.status.is_failure(),
         }
     }
 }
 
-pub(super) fn status_counts(results: &[TestResult]) -> (usize, usize, usize) {
+pub(super) fn status_counts(results: &[TestResult]) -> (usize, usize, usize, usize) {
     results.iter().fold(
-        (0, 0, 0),
-        |(passed, failed, ignored), result| match result.status {
-            TestStatus::Pass => (passed + 1, failed, ignored),
-            TestStatus::Fail => (passed, failed + 1, ignored),
-            TestStatus::Ignored => (passed, failed, ignored + 1),
+        (0, 0, 0, 0),
+        |(passed, failed, ignored, timed_out), result| match result.status {
+            TestStatus::Pass => (passed + 1, failed, ignored, timed_out),
+            TestStatus::Fail => (passed, failed + 1, ignored, timed_out),
+            TestStatus::Ignored => (passed, failed, ignored + 1, timed_out),
+            TestStatus::Timeout => (passed, failed, ignored, timed_out + 1),
         },
     )
 }
@@ -115,6 +121,7 @@ fn status_cell(status: TestStatus, color: bool) -> Cell {
         TestStatus::Pass => cell.fg(Color::Green),
         TestStatus::Fail => cell.fg(Color::Red),
         TestStatus::Ignored => cell.fg(Color::Yellow),
+        TestStatus::Timeout => cell.fg(Color::Red).add_attribute(Attribute::Bold),
     }
 }
 
@@ -134,13 +141,14 @@ fn duration_cell(duration: Duration, config: &TesterConfig) -> Cell {
 }
 
 fn summary_line(results: &[TestResult], total: Duration, unicode: bool, color: bool) -> String {
-    let (passed, failed, ignored) = status_counts(results);
+    let (passed, failed, ignored, timed_out) = status_counts(results);
     let separator = if unicode { " \u{00B7} " } else { " | " };
 
     format!(
-        "{}{separator}{}{separator}{}{separator}Total: {}",
+        "{}{separator}{}{separator}{}{separator}{}{separator}Total: {}",
         summary_part(passed, "passed", "32", color),
         summary_part(failed, "failed", "31", color),
+        summary_part(timed_out, "timed out", "31", color),
         summary_part(ignored, "ignored", "33", color),
         formatting::duration(total)
     )

@@ -1,11 +1,7 @@
-<!--<p align="center">
-  <img src="./images/ico.png" alt="ico" width="190">
-</p>-->
-
 <h1 align="center">Cargo Tester</h1>
 
 <p align="center">
-  Subcomando de Cargo para ejecutar tests de Rust más eficientes.
+  Subcomando de Cargo para ejecutar tests de Rust con reportes estructurados y legibles.
 </p>
 
 <p align="center">
@@ -39,11 +35,12 @@ cargo tester --details
 - Tabla estable con archivo, familia, nombre, estado y duración.
 - Filtros por nombre, familia, grupo y último resultado fallido.
 - Ejecución paralela configurable con grupos que pueden forzarse a secuencial.
+- Timeout por test, cancelación del grupo de procesos y captura de salida acotada.
 - Detalles de panic con archivo, línea, función, salida capturada y contexto.
 - Historial acotado y detección de regresiones de rendimiento.
 - Reportes persistentes en texto plano y JSON.
 - Salida específica para CI y anotaciones automáticas en GitHub Actions.
-- Compatibilidad con workspaces, features y selecciones habituales de Cargo.
+- Compatibilidad explícita con binarios que usan el harness estándar `libtest`.
 
 ## Requisitos
 
@@ -53,10 +50,10 @@ cargo tester --details
 
 ## Instalación
 
-Desde GitHub:
+Con Cargo, fijando la versión de producción:
 
 ```console
-cargo install --git https://github.com/Roger08G/cargo-tester --locked
+cargo install --git https://github.com/Roger08G/cargo-tester --tag v1.0.0 --locked
 ```
 
 Desde una copia local del repositorio:
@@ -65,8 +62,23 @@ Desde una copia local del repositorio:
 cargo install --path . --locked
 ```
 
-También se pueden descargar binarios desde
-[GitHub Releases](../../releases/latest) cuando exista una versión publicada.
+En Windows x86-64 se puede usar el instalador
+`cargo-tester-v1.0.0-windows-x86_64-setup.exe` publicado en
+[GitHub Releases](https://github.com/Roger08G/cargo-tester/releases/latest). Instala `cargo-tester.exe` en el
+directorio `bin` de `CARGO_HOME` o, si la variable no está definida, en
+`%USERPROFILE%\.cargo\bin`.
+
+El release también contiene archivos portables para Windows, Linux y macOS, un
+archivo fuente explícito y `SHA256SUMS.txt`. Verifica el instalador antes de
+ejecutarlo:
+
+```powershell
+(Get-FileHash .\cargo-tester-v1.0.0-windows-x86_64-setup.exe -Algorithm SHA256).Hash
+Get-Content .\SHA256SUMS.txt
+```
+
+Los binarios de v1.0.0 no están firmados con Authenticode. Windows puede mostrar
+una advertencia; comprueba siempre el SHA-256 descargado desde el release.
 
 Después de instalarlo, el comando queda disponible globalmente:
 
@@ -109,8 +121,9 @@ cargo tester --last-failed
 cargo tester --last-failed --details
 ```
 
-`--last-failed` conserva también las opciones de Cargo y del harness necesarias
-para reproducir la selección anterior.
+`--last-failed` conserva en ejecuciones locales las opciones de Cargo y del
+harness necesarias para reproducir la selección anterior. El modo `--ci` omite
+esos argumentos por privacidad; en ese caso deben indicarse de nuevo.
 
 ## Comandos
 
@@ -153,6 +166,12 @@ cargo tester -- --test-threads=1
 `--exact`, `--list`, `--skip`, `--format` y `--color` están reservados porque
 `cargo-tester` los utiliza para descubrir y clasificar cada test.
 
+La selección `--ignored` y `--include-ignored` está soportada. Los doctests
+(`--doc`) y los harness personalizados (`harness = false`) no lo están y
+producen un error explícito. Consulta el
+[contrato del modelo de ejecución](docs/EXECUTION_MODEL.md) para conocer la
+semántica y los límites exactos.
+
 ## Configuración
 
 La configuración se busca en este orden:
@@ -160,7 +179,7 @@ La configuración se busca en este orden:
 1. `tester.toml` en la raíz del proyecto.
 2. `.cargo/tester.toml`.
 
-Si no existe ninguno, se utilizan valores seguros por defecto.
+Si no existe ninguno, se utilizan los valores predeterminados.
 
 ```toml
 [output]
@@ -176,6 +195,17 @@ max-width = 140
 [execution]
 # 0 utiliza el paralelismo disponible; 1 fuerza ejecución secuencial.
 jobs = 0
+test-timeout = "5m"
+discovery-timeout = "15m"
+# La salida estructurada de Cargo puede ser mayor que la de un solo test.
+max-discovery-output-bytes = 16777216
+# Límite independiente para stdout y stderr de cada proceso.
+max-output-bytes = 262144
+
+[privacy]
+include-captured-output = true
+include-source-context = true
+redact = false
 
 [timing]
 slow-threshold = "1s"
@@ -215,11 +245,32 @@ máximo de procesos simultáneos. Los tests de un grupo con `sequential = true`
 se ejecutan sin concurrencia, apropiado para recursos compartidos como puertos o
 archivos temporales globales.
 
+Cada test se ejecuta en un proceso aislado. `test-timeout` limita ese proceso y
+`discovery-timeout` limita la compilación y cada consulta `--list`.
+`max-discovery-output-bytes` acota la salida estructurada necesaria para el
+descubrimiento; si no cabe completa, la herramienta pide aumentar el límite en
+lugar de trabajar con una lista parcial. `max-output-bytes` conserva como máximo
+ese número de bytes de stdout y de stderr por proceso de test sin dejar de
+drenar sus tuberías. Un valor cero no es válido.
+
 Los patrones de grupos utilizan globbing sobre el nombre completo del test:
 
 ```console
 cargo tester --group parser
 ```
+
+### Privacidad
+
+En ejecuciones locales, `include-captured-output` e
+`include-source-context` controlan si `--details` conserva la salida y el
+contexto fuente. `redact` sustituye rutas absolutas del workspace/home y formas
+habituales de secretos antes de persistirlas.
+
+`--ci` aplica una política más restrictiva: activa el saneamiento y omite por
+completo la salida capturada, el contexto fuente, el directorio de trabajo y los
+argumentos de ejecución en los artefactos. El saneamiento es una defensa en
+profundidad, no una garantía para texto arbitrario; los tests no deben imprimir
+secretos. Consulta [SECURITY.md](SECURITY.md) antes de publicar artefactos.
 
 ### Historial y regresiones
 
@@ -263,12 +314,17 @@ Con la ruta por defecto:
 
 `details.json` se genera con `--details` o `--ci`. En una ejecución normal se
 elimina para evitar que un reporte antiguo parezca actual.
-El esquema actual es `3` y limita el contenido a datos observados del test y de
+El esquema actual es `4` y limita el contenido a datos observados del test y de
 su fallo.
+
+Las escrituras se realizan mediante reemplazo atómico. Un bloqueo común por
+directorio de salida serializa las actualizaciones de ejecuciones concurrentes,
+evitando JSON parcial y pérdidas del historial.
 
 ## Integración continua
 
-`--ci` desactiva colores, Unicode y emojis, y siempre genera `details.json`:
+`--ci` desactiva colores, Unicode y emojis, aplica la política de privacidad CI
+y genera `details.json`, incluso cuando ningún test coincide:
 
 ```console
 cargo tester --ci --workspace --all-features
@@ -282,8 +338,13 @@ Este repositorio incluye:
 - CI en Linux, Windows y macOS.
 - Comprobación del MSRV declarado (`1.85`).
 - Formato, Clippy, tests, empaquetado y prueba end-to-end.
+- Fixtures end-to-end para fallos, workspaces, ignorados, salida masiva,
+  timeouts, concurrencia, errores de compilación y harness personalizados.
 - Publicación de reportes como artefactos de GitHub Actions.
-- Construcción de binarios al crear tags `v*`.
+- Retención de artefactos limitada a 7 días y lista cerrada de archivos.
+- Auditoría RustSec de las dependencias bloqueadas.
+- Validación previa al release, binarios multiplataforma, instalador Windows,
+  checksums SHA-256 y archivo fuente al crear tags `v*`.
 - Dependabot para Cargo y GitHub Actions.
 
 ## Desarrollo
@@ -294,6 +355,10 @@ cargo test --locked
 cargo clippy --all-targets --all-features -- -D warnings
 cargo package --locked
 ```
+
+El benchmark manual del modelo aislado frente a `cargo test` se documenta en
+[docs/EXECUTION_MODEL.md](docs/EXECUTION_MODEL.md). No existe una afirmación de
+que un modelo sea universalmente más rápido que el otro.
 
 `tests/example.rs` contiene dos fallos demostrativos desactivados por defecto.
 Para validar visualmente el reporte completo:
@@ -312,6 +377,9 @@ src/
 |-- cli.rs              Argumentos de tester, Cargo y libtest
 |-- config.rs           Carga y validación de tester.toml
 |-- runner.rs           Descubrimiento y ejecución paralela
+|-- process.rs          Timeout, cancelación y captura acotada
+|-- persistence.rs      Bloqueo y reemplazo atómico de reportes
+|-- privacy.rs          Saneamiento de rutas y texto sensible
 |-- source.rs           Resolución de archivo, función y línea
 |-- history.rs          Historial y regresiones
 |-- state.rs            Estado de la última ejecución

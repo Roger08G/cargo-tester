@@ -1,13 +1,14 @@
 use crate::{
     config::TesterConfig,
     formatting,
-    runner::{FailureOutput, TestResult, TestStatus},
+    privacy::{sanitize_path, sanitize_text},
+    runner::{FailureOutput, TestResult},
 };
 
 pub fn render_failure_details(results: &[TestResult], config: &TesterConfig) -> Option<String> {
     let failures = results
         .iter()
-        .filter(|result| result.status == TestStatus::Fail)
+        .filter(|result| result.status.is_failure())
         .collect::<Vec<_>>();
 
     if failures.is_empty() {
@@ -38,7 +39,7 @@ fn append_failure_card(details: &mut String, result: &TestResult, style: &Detail
         details,
         style,
         "Path",
-        &formatting::source_path(&result.file, result.line),
+        &formatting::source_path(&sanitize_path(&result.file, style.redact), result.line),
     );
     append_field(
         details,
@@ -47,13 +48,15 @@ fn append_failure_card(details: &mut String, result: &TestResult, style: &Detail
         &formatting::duration(result.duration),
     );
 
-    if let Some(source_line) = &result.source_line {
-        append_field(
-            details,
-            style,
-            "Function",
-            &formatting::function_signature(source_line),
-        );
+    if style.include_source_context {
+        if let Some(source_line) = &result.source_line {
+            append_field(
+                details,
+                style,
+                "Function",
+                &sanitize_text(&formatting::function_signature(source_line), style.redact),
+            );
+        }
     }
 
     if let Some(failure) = &result.failure {
@@ -68,26 +71,56 @@ fn append_failure_output(details: &mut String, failure: &FailureOutput, style: &
     if let Some(panic) = &failure.panic {
         append_section(details, style, "Panic");
         if let Some(message) = &panic.message {
-            append_field(details, style, "Message", message);
+            append_field(
+                details,
+                style,
+                "Message",
+                &sanitize_text(message, style.redact),
+            );
         }
     }
 
-    append_captured_output(details, style, "Captured stdout", &failure.stdout);
-    append_captured_output(details, style, "Captured stderr", &failure.stderr);
+    if style.include_captured_output {
+        append_captured_output(
+            details,
+            style,
+            "Captured stdout",
+            &failure.stdout,
+            failure.stdout_truncated,
+        );
+        append_captured_output(
+            details,
+            style,
+            "Captured stderr",
+            &failure.stderr,
+            failure.stderr_truncated,
+        );
+    }
 }
 
-fn append_captured_output(details: &mut String, style: &DetailStyle, label: &str, output: &str) {
+fn append_captured_output(
+    details: &mut String,
+    style: &DetailStyle,
+    label: &str,
+    output: &str,
+    truncated: bool,
+) {
     let output = output.trim();
     if output.is_empty() {
         return;
     }
 
-    append_section(details, style, label);
+    let label = if truncated {
+        format!("{label} (truncated at configured limit)")
+    } else {
+        label.to_owned()
+    };
+    append_section(details, style, &label);
     append_blank_line(details, style);
     for line in output.lines() {
         details.push_str(style.vertical);
         details.push_str("   ");
-        details.push_str(&style.muted(line));
+        details.push_str(&style.muted(&sanitize_text(line, style.redact)));
         details.push('\n');
     }
     append_blank_line(details, style);
@@ -119,6 +152,9 @@ fn append_blank_line(details: &mut String, style: &DetailStyle) {
 struct DetailStyle {
     color: bool,
     emoji: bool,
+    include_captured_output: bool,
+    include_source_context: bool,
+    redact: bool,
     top_left: &'static str,
     bottom_left: &'static str,
     horizontal: &'static str,
@@ -131,6 +167,9 @@ impl DetailStyle {
             Self {
                 color: config.output.color,
                 emoji: config.output.emoji,
+                include_captured_output: config.privacy.include_captured_output,
+                include_source_context: config.privacy.include_source_context,
+                redact: config.privacy.redact,
                 top_left: "\u{256D}",
                 bottom_left: "\u{2570}",
                 horizontal: "\u{2500}",
@@ -140,6 +179,9 @@ impl DetailStyle {
             Self {
                 color: config.output.color,
                 emoji: config.output.emoji,
+                include_captured_output: config.privacy.include_captured_output,
+                include_source_context: config.privacy.include_source_context,
+                redact: config.privacy.redact,
                 top_left: "+",
                 bottom_left: "+",
                 horizontal: "-",

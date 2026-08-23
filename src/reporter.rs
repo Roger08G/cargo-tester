@@ -13,6 +13,8 @@ use std::{
 
 use anyhow::{Context, Result};
 
+use crate::persistence::atomic_write;
+
 pub use ci::render_github_annotations;
 pub use details::render_failure_details;
 pub use history::{render_history, render_regressions};
@@ -59,12 +61,9 @@ fn remove_output_file(output_path: &Path, file_name: &str) -> Result<()> {
 }
 
 fn write_output_file(output_path: &Path, file_name: &str, contents: &str) -> Result<()> {
-    fs::create_dir_all(output_path)
-        .with_context(|| format!("failed to create {}", output_path.display()))?;
-
     let path = output_path.join(file_name);
     let contents = with_trailing_newline(contents);
-    fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
+    atomic_write(&path, contents.as_bytes())
 }
 
 fn with_trailing_newline(contents: &str) -> String {

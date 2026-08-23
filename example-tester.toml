@@ -9,6 +9,15 @@ show-ignored = true
 
 [execution]
 jobs = 0
+test-timeout = "5m"
+discovery-timeout = "15m"
+max-discovery-output-bytes = 16777216
+max-output-bytes = 262144
+
+[privacy]
+include-captured-output = true
+include-source-context = true
+redact = false
 
 [timing]
 slow-threshold = "1s"

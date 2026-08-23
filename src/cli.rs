@@ -97,6 +97,11 @@ impl Cli {
                 "--last-failed" => cli.last_failed = true,
                 "--no-color" => cli.no_color = true,
                 "-V" | "--version" => cli.version = true,
+                "--doc" => {
+                    bail!(
+                        "--doc is not supported; cargo-tester currently executes standard libtest binary targets only"
+                    )
+                }
                 "--group" => {
                     if cli.group.is_some() {
                         bail!("option --group can only be used once");
@@ -200,7 +205,7 @@ Options:
   --failed         Show only failed tests in the table
   --last-failed    Run only tests that failed in the previous execution
   --group <NAME>   Run a group configured in tester.toml
-  --ci             Use stable CI output and always write details.json
+  --ci             Use sanitized CI output and write test results to details.json
   --history        Show recent executions without running tests
   --no-color       Disable colored output
   -h, --help       Print help
@@ -213,6 +218,9 @@ Examples:
   cargo tester --group parser
   cargo tester --ci --workspace --all-features
   cargo tester --history
+
+Compatibility:
+  Standard libtest binary targets only; doctests and custom harnesses are unsupported.
 "
     );
 }

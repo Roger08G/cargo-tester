@@ -11,6 +11,8 @@ use crate::{
     cli::{self, Cli},
     config::TesterConfig,
     history::History,
+    persistence::OutputLock,
+    process::Cancellation,
     reporter::{
         ReportFilter, remove_details_json, render_details_recommendation, render_failure_details,
         render_github_annotations, render_history, render_regressions, render_report_with_filter,
@@ -18,7 +20,7 @@ use crate::{
     },
     runner::{DiscoveryOptions, ExecutionOptions, discover_tests, has_failures, run_tests},
     source::SourceIndex,
-    state::{load_last_run, write_last_run_with_options},
+    state::{load_last_run, write_last_run_with_privacy},
 };
 
 pub fn run() -> Result<ExitCode> {
@@ -43,12 +45,15 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
     config.output.color &= terminal_supports_color(&cli);
 
     if cli.history {
+        let _output_lock = OutputLock::acquire(&config.output.output_path)?;
         println!(
             "{}",
             render_history(&History::load(&config.output.output_path)?, &config)
         );
         return Ok(ExitCode::SUCCESS);
     }
+
+    let _cancellation = Cancellation::install()?;
 
     let mut cargo_args = cli.cargo_args.clone();
     let mut harness_args = cli.harness_args.clone();
@@ -61,7 +66,7 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
                     "No previous test execution was found.",
                 );
             }
-            Some(previous) if previous.failed_tests.is_empty() => {
+            Some(previous) if !previous.has_failures() => {
                 return finish_empty_run(
                     &config,
                     cli.details || cli.ci,
@@ -70,12 +75,12 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
             }
             Some(previous) => {
                 if cargo_args.is_empty() {
-                    cargo_args = previous.cargo_args;
+                    cargo_args = previous.cargo_args.clone();
                 }
                 if harness_args.is_empty() {
-                    harness_args = previous.harness_args;
+                    harness_args = previous.harness_args.clone();
                 }
-                Some(previous.failed_tests)
+                Some(previous)
             }
         }
     } else {
@@ -85,6 +90,10 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
     let mut tests = discover_tests(DiscoveryOptions {
         filter: cli.filter.as_deref(),
         cargo_args: &cargo_args,
+        harness_args: &harness_args,
+        timeout: config.execution.discovery_timeout(),
+        max_output_bytes: config.execution.max_discovery_output_bytes,
+        redact_output: config.privacy.redact,
     })?;
 
     if let Some(group_name) = cli.group.as_deref() {
@@ -92,7 +101,7 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
         tests.retain(|test| matcher.is_match(&test.full_name));
     }
     if let Some(previous_failures) = &previous_failures {
-        tests.retain(|test| previous_failures.contains(&test.full_name));
+        tests.retain(|test| previous_failures.matches(test));
     }
 
     if tests.is_empty() {
@@ -115,9 +124,12 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
             harness_args: &harness_args,
             jobs: config.execution.resolved_jobs(),
             sequential_tests: &sequential_tests,
+            timeout: config.execution.test_timeout(),
+            max_output_bytes: config.execution.max_output_bytes,
         },
     )?;
     let total = started.elapsed();
+    let _output_lock = OutputLock::acquire(&config.output.output_path)?;
 
     let mut history = if config.history.enabled {
         match History::load(&config.output.output_path) {
@@ -157,11 +169,12 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
         append_failure_details(&mut file_report, &results, &file_config);
     }
     write_report(&file_report, &config.output.output_path)?;
-    write_last_run_with_options(
+    write_last_run_with_privacy(
         &results,
         &config.output.output_path,
         &cargo_args,
         &harness_args,
+        &config.privacy,
     )?;
 
     if cli.details {
@@ -170,13 +183,19 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
         }
     }
     if cli.details || cli.ci {
-        write_details_json(&results, total, &config.output.output_path)?;
+        write_details_json(&results, total, &config.output.output_path, &config.privacy)?;
     } else {
         remove_details_json(&config.output.output_path)?;
     }
 
     if let Some(history) = &mut history {
-        history.record(&results, total, &config.history, &config.output.output_path)?;
+        history.record(
+            &results,
+            total,
+            &config.history,
+            &config.privacy,
+            &config.output.output_path,
+        )?;
     }
 
     Ok(if failed {
@@ -200,10 +219,16 @@ fn report_filter(cli: &Cli) -> ReportFilter {
 
 fn finish_empty_run(config: &TesterConfig, write_details: bool, message: &str) -> Result<ExitCode> {
     println!("{message}");
+    let _output_lock = OutputLock::acquire(&config.output.output_path)?;
     write_report(message, &config.output.output_path)?;
 
     if write_details {
-        write_details_json(&[], Duration::ZERO, &config.output.output_path)?;
+        write_details_json(
+            &[],
+            Duration::ZERO,
+            &config.output.output_path,
+            &config.privacy,
+        )?;
     } else {
         remove_details_json(&config.output.output_path)?;
     }

@@ -1,6 +1,6 @@
 [package]
 name = "cargo-tester"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.85"
 description = "A Cargo subcommand for structured, timed, and detailed Rust test reports"
@@ -17,7 +17,11 @@ demo-failures = []
 
 [dependencies]
 anyhow = "1"
+atomic-write-file = "0.3"
+command-group = "5"
 comfy-table = "~7.1"
+ctrlc = { version = "3.5", features = ["termination"] }
+fs2 = "0.4"
 globset = "0.4"
 humantime = "2"
 regex = "1"

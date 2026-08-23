@@ -54,9 +54,11 @@ mod cli_features {
             .expect_err("history should be a standalone operation");
         let harness = Cli::parse_from(["--", "--format=json"])
             .expect_err("managed harness options should be rejected");
+        let doctest = Cli::parse_from(["--doc"]).expect_err("doctests should be explicit");
 
         assert!(history.to_string().contains("cannot be combined"));
         assert!(harness.to_string().contains("managed by cargo-tester"));
+        assert!(doctest.to_string().contains("not supported"));
     }
 
     #[test]
@@ -159,6 +161,9 @@ mod config_features {
         assert!(!config.output.color);
         assert!(!config.output.unicode);
         assert!(!config.output.emoji);
+        assert!(!config.privacy.include_captured_output);
+        assert!(config.privacy.redact);
+        assert!(!config.privacy.include_source_context);
     }
 }
 
@@ -200,7 +205,7 @@ mod persistence_features {
         assert_eq!(previous.cargo_args, cargo_args);
         assert_eq!(previous.harness_args, harness_args);
         assert_eq!(
-            previous.failed_tests,
+            previous.failed_tests(),
             HashSet::from(["suite::case_1".to_owned()])
         );
         fs::remove_dir_all(root).unwrap();
@@ -229,6 +234,7 @@ mod persistence_features {
                 &[result(1, TestStatus::Pass, 100)],
                 Duration::from_millis(100),
                 &config.history,
+                &config.privacy,
                 &root,
             )
             .unwrap();
@@ -242,6 +248,7 @@ mod persistence_features {
                 &[result(1, TestStatus::Pass, 150)],
                 Duration::from_millis(150),
                 &config.history,
+                &config.privacy,
                 &root,
             )
             .unwrap();
@@ -250,6 +257,7 @@ mod persistence_features {
                 &[result(1, TestStatus::Pass, 160)],
                 Duration::from_millis(160),
                 &config.history,
+                &config.privacy,
                 &root,
             )
             .unwrap();
@@ -307,7 +315,7 @@ mod reporter_features {
         assert!(!report.contains("case_1"));
         assert!(report.contains("case_2"));
         assert!(!report.contains("case_3"));
-        assert!(report.contains("1 passed | 1 failed | 1 ignored"));
+        assert!(report.contains("1 passed | 1 failed | 0 timed out | 1 ignored"));
     }
 
     #[test]
@@ -317,6 +325,8 @@ mod reporter_features {
         failed.failure = Some(FailureOutput {
             stdout: String::new(),
             stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
             exit_code: Some(101),
             panic: Some(PanicDetails {
                 file: "tests\\example.rs".to_owned(),

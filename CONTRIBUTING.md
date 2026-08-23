@@ -10,6 +10,7 @@ Requisitos:
 - Rust `1.85` o posterior.
 - Cargo y rustup.
 - Componentes `rustfmt` y `clippy`.
+- `cargo-audit` para ejecutar la auditoría local de dependencias.
 
 ```console
 rustup component add rustfmt clippy
@@ -28,6 +29,7 @@ cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --all-targets --all-features -- -D warnings
 cargo package --locked
+cargo audit
 ```
 
 Los dos fallos demostrativos de `tests/example.rs` solo deben activarse para
@@ -43,8 +45,19 @@ cargo tester --features demo-failures --details --group sandbox
 - El crate sigue compilando con el MSRV declarado.
 - La salida de archivo no contiene ANSI, emojis ni bordes Unicode.
 - Los cambios de JSON conservan un esquema explícito y documentado.
+- Los fixtures end-to-end cubren cualquier cambio de procesos, persistencia,
+  privacidad o compatibilidad con `libtest`.
 - Los errores incluyen contexto suficiente para actuar sobre ellos.
 - No se incorporan refactors ajenos al objetivo del cambio.
+
+## Releases
+
+- `Cargo.toml` y el tag deben declarar exactamente la misma versión.
+- Los tags de producción se crean desde una rama `vX.Y.Z` validada por CI.
+- `CHANGELOG.md` vive solo en esas ramas de release y nunca se incorpora a
+  `main`.
+- El workflow debe publicar archivos portables, instalador Windows, fuentes y
+  checksums antes de marcar el release como final.
 
 ## Pull requests
 

@@ -20,6 +20,7 @@ pub struct TesterConfig {
     pub groups: BTreeMap<String, GroupConfig>,
     pub history: HistoryConfig,
     pub output: OutputConfig,
+    pub privacy: PrivacyConfig,
     pub timing: TimingConfig,
 }
 
@@ -70,6 +71,9 @@ impl TesterConfig {
         self.output.color = false;
         self.output.emoji = false;
         self.output.unicode = false;
+        self.privacy.include_captured_output = false;
+        self.privacy.redact = true;
+        self.privacy.include_source_context = false;
     }
 
     pub fn group(&self, name: &str) -> Result<&GroupConfig> {
@@ -127,6 +131,14 @@ impl TesterConfig {
             bail!("history max-runs and show-runs-history must be greater than zero");
         }
 
+        if self.execution.test_timeout.is_zero() || self.execution.discovery_timeout.is_zero() {
+            bail!("execution timeouts must be greater than zero");
+        }
+
+        if self.execution.max_output_bytes == 0 || self.execution.max_discovery_output_bytes == 0 {
+            bail!("execution output limits must be greater than zero");
+        }
+
         if !self.history.regression_threshold_percent.is_finite()
             || self.history.regression_threshold_percent < 0.0
         {
@@ -174,10 +186,16 @@ impl Default for OutputConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ExecutionConfig {
     pub jobs: usize,
+    pub max_discovery_output_bytes: usize,
+    pub max_output_bytes: usize,
+    #[serde(deserialize_with = "deserialize_duration")]
+    discovery_timeout: Duration,
+    #[serde(deserialize_with = "deserialize_duration")]
+    test_timeout: Duration,
 }
 
 impl ExecutionConfig {
@@ -188,6 +206,44 @@ impl ExecutionConfig {
                 .unwrap_or(1)
         } else {
             self.jobs
+        }
+    }
+
+    pub fn discovery_timeout(&self) -> Duration {
+        self.discovery_timeout
+    }
+
+    pub fn test_timeout(&self) -> Duration {
+        self.test_timeout
+    }
+}
+
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self {
+            jobs: 0,
+            max_discovery_output_bytes: 16 * 1024 * 1024,
+            max_output_bytes: 256 * 1024,
+            discovery_timeout: Duration::from_secs(15 * 60),
+            test_timeout: Duration::from_secs(5 * 60),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PrivacyConfig {
+    pub include_captured_output: bool,
+    pub include_source_context: bool,
+    pub redact: bool,
+}
+
+impl Default for PrivacyConfig {
+    fn default() -> Self {
+        Self {
+            include_captured_output: true,
+            include_source_context: true,
+            redact: false,
         }
     }
 }

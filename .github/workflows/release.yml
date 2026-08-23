@@ -8,13 +8,67 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  validate:
+    name: Validate release contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup component add --toolchain stable rustfmt clippy
+          rustup default stable
+
+      - name: Validate tag, branch-only changelog and version
+        shell: bash
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          test "v$version" = "${GITHUB_REF_NAME}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo.toml version v$version" >&2
+            exit 1
+          }
+          test -s CHANGELOG.md || {
+            echo "A non-empty CHANGELOG.md is required on the release tag" >&2
+            exit 1
+          }
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Verify package
+        run: cargo package --locked
+
+      - name: Audit Rust dependencies
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     name: Build (${{ matrix.target }})
+    needs: validate
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -28,7 +82,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Rust target
         shell: bash
@@ -40,7 +94,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
-      - name: Package binary
+      - name: Package portable archive
         shell: pwsh
         run: |
           $target = "${{ matrix.target }}"
@@ -61,8 +115,100 @@ jobs:
             tar -czf "artifacts/$name.tar.gz" -C $staging .
           }
 
-      - name: Upload release archive
-        uses: actions/upload-artifact@v7
+      - name: Build verified Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $innoVersion = "6.5.3"
+          $expectedSha256 = "9345ee029faa0b7aed0818c3d5b227699ef9a496cce79e20c19eb9d6ef2e2c2d"
+          $innoInstaller = Join-Path $env:RUNNER_TEMP "innosetup-$innoVersion.exe"
+          $innoUrl = "https://github.com/jrsoftware/issrc/releases/download/is-6_5_3/innosetup-$innoVersion.exe"
+
+          Invoke-WebRequest -Uri $innoUrl -OutFile $innoInstaller
+          $actualSha256 = (Get-FileHash -Algorithm SHA256 $innoInstaller).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "Inno Setup checksum mismatch: expected $expectedSha256, got $actualSha256"
+          }
+
+          $installOptions = @{
+            FilePath = $innoInstaller
+            ArgumentList = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER")
+            WindowStyle = "Hidden"
+            Wait = $true
+            PassThru = $true
+          }
+          $install = Start-Process @installOptions
+          if ($install.ExitCode -ne 0) {
+            throw "Inno Setup installation failed with exit code $($install.ExitCode)"
+          }
+
+          $compilerCandidates = @(
+            (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe")
+          )
+          $compiler = $compilerCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $compiler) {
+            throw "ISCC.exe was not found after installing Inno Setup"
+          }
+
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $sourceExe = (Resolve-Path "target/${{ matrix.target }}/release/cargo-tester.exe").Path
+          $repoRoot = (Resolve-Path ".").Path
+          $outputDir = (Resolve-Path "artifacts").Path
+
+          & $compiler "/DMyAppVersion=$version" "/DMySourceExe=$sourceExe" "/DMyRepoRoot=$repoRoot" "/DMyOutputDir=$outputDir" "packaging/windows-installer.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compilation failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Smoke-test Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "cargo-tester-installer-smoke"
+          $cargoHome = Join-Path $smokeRoot "cargo-home"
+          $appDir = Join-Path $smokeRoot "app"
+          New-Item -ItemType Directory -Force -Path (Join-Path $cargoHome "bin"), $appDir | Out-Null
+          $env:CARGO_HOME = $cargoHome
+
+          $setup = Get-ChildItem "artifacts" -Filter "*-setup.exe" | Select-Object -First 1
+          if (-not $setup) {
+            throw "Windows installer artifact was not produced"
+          }
+          $installOptions = @{
+            FilePath = $setup.FullName
+            ArgumentList = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=$appDir")
+            WindowStyle = "Hidden"
+            Wait = $true
+            PassThru = $true
+          }
+          $install = Start-Process @installOptions
+          if ($install.ExitCode -ne 0) {
+            throw "Installer smoke test failed with exit code $($install.ExitCode)"
+          }
+
+          $installedExe = Join-Path $cargoHome "bin\cargo-tester.exe"
+          $expectedVersion = "${{ github.ref_name }}".TrimStart("v")
+          $actualVersion = & $installedExe --version
+          if ($LASTEXITCODE -ne 0 -or $actualVersion -ne "cargo-tester $expectedVersion") {
+            throw "Installed binary version check failed: $actualVersion"
+          }
+
+          $uninstaller = Join-Path $appDir "unins000.exe"
+          $uninstallOptions = @{
+            FilePath = $uninstaller
+            ArgumentList = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
+            WindowStyle = "Hidden"
+            Wait = $true
+            PassThru = $true
+          }
+          $uninstall = Start-Process @uninstallOptions
+          if ($uninstall.ExitCode -ne 0 -or (Test-Path -LiteralPath $installedExe)) {
+            throw "Installer uninstall smoke test failed"
+          }
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-${{ matrix.target }}
           path: artifacts/*
@@ -74,44 +220,51 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Rust stable
-        run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
-
-      - name: Validate tag version
-        shell: bash
-        run: |
-          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
-          test "v$version" = "${GITHUB_REF_NAME}" || {
-            echo "Tag ${GITHUB_REF_NAME} does not match Cargo.toml version v$version" >&2
-            exit 1
-          }
-
-      - name: Download release archives
-        uses: actions/download-artifact@v8
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
 
+      - name: Package explicit source archive
+        shell: bash
+        run: |
+          git archive \
+            --format=zip \
+            --prefix="cargo-tester-${GITHUB_REF_NAME}-source/" \
+            --output="dist/cargo-tester-${GITHUB_REF_NAME}-source.zip" \
+            HEAD
+
       - name: Generate checksums
         working-directory: dist
-        run: sha256sum cargo-tester-* > SHA256SUMS
+        shell: bash
+        run: LC_ALL=C sha256sum cargo-tester-* > SHA256SUMS.txt
 
-      - name: Publish release
+      - name: Publish production release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          title="Production ${GITHUB_REF_NAME}"
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "$title" \
+              --notes-file CHANGELOG.md \
+              --latest
             gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes
+            gh release create "${GITHUB_REF_NAME}" dist/* \
+              --verify-tag \
+              --title "$title" \
+              --notes-file CHANGELOG.md \
+              --latest
           fi

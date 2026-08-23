@@ -78,6 +78,17 @@ mod config_tests {
         );
         assert_eq!(config.timing.slow_threshold(), Duration::from_secs(1));
         assert_eq!(config.timing.very_slow_threshold(), Duration::from_secs(5));
+        assert_eq!(config.execution.test_timeout(), Duration::from_secs(300));
+        assert_eq!(
+            config.execution.discovery_timeout(),
+            Duration::from_secs(900)
+        );
+        assert_eq!(config.execution.max_output_bytes, 256 * 1024);
+        assert_eq!(
+            config.execution.max_discovery_output_bytes,
+            16 * 1024 * 1024
+        );
+        assert!(!config.privacy.redact);
     }
 
     #[test]
@@ -131,6 +142,47 @@ mod config_tests {
         )
         .expect_err("invalid threshold order should fail");
         assert!(invalid_order.to_string().contains("slow-threshold"));
+    }
+
+    #[test]
+    fn validates_execution_limits() {
+        let config = TesterConfig::parse(
+            r#"
+            [execution]
+            jobs = 2
+            test-timeout = "750ms"
+            discovery-timeout = "30s"
+            max-discovery-output-bytes = 1048576
+            max-output-bytes = 4096
+
+            [privacy]
+            include-captured-output = false
+            include-source-context = false
+            redact = true
+            "#,
+        )
+        .expect("execution limits should parse");
+
+        assert_eq!(config.execution.resolved_jobs(), 2);
+        assert_eq!(config.execution.test_timeout(), Duration::from_millis(750));
+        assert_eq!(
+            config.execution.discovery_timeout(),
+            Duration::from_secs(30)
+        );
+        assert_eq!(config.execution.max_output_bytes, 4096);
+        assert_eq!(config.execution.max_discovery_output_bytes, 1_048_576);
+        assert!(!config.privacy.include_captured_output);
+        assert!(!config.privacy.include_source_context);
+        assert!(config.privacy.redact);
+
+        for contents in [
+            "[execution]\ntest-timeout = \"0s\"",
+            "[execution]\ndiscovery-timeout = \"0s\"",
+            "[execution]\nmax-output-bytes = 0",
+            "[execution]\nmax-discovery-output-bytes = 0",
+        ] {
+            assert!(TesterConfig::parse(contents).is_err());
+        }
     }
 
     #[test]
@@ -245,6 +297,7 @@ mod runner_tests {
         assert_eq!(TestStatus::Pass.label(), "PASS");
         assert_eq!(TestStatus::Fail.label(), "FAIL");
         assert_eq!(TestStatus::Ignored.label(), "IGNORED");
+        assert_eq!(TestStatus::Timeout.label(), "TIMEOUT");
     }
 
     #[test]
@@ -283,7 +336,7 @@ mod reporter_tests {
         assert!(report.contains("| ID "));
         assert!(report.contains("| PASS "));
         assert!(report.contains("| FAIL "));
-        assert!(report.contains("\n\n1 passed | 1 failed | 0 ignored"));
+        assert!(report.contains("\n\n1 passed | 1 failed | 0 timed out | 0 ignored"));
     }
 
     #[test]
@@ -312,7 +365,7 @@ mod reporter_tests {
         assert!(!report.contains("case_1"));
         assert!(!report.contains("case_3"));
         assert!(report.contains("fails_when_expected_patch_is_missing"));
-        assert!(report.contains("\n\n1 passed | 1 failed | 1 ignored"));
+        assert!(report.contains("\n\n1 passed | 1 failed | 0 timed out | 1 ignored"));
     }
 
     #[test]
@@ -390,7 +443,7 @@ mod reporter_tests {
         assert!(emoji_details.contains("[#2] \u{1F9EA} fails_when_expected_patch_is_missing"));
         assert!(!details.contains("Posible solucion:"));
 
-        write_details_json(&results, Duration::from_millis(25), &root)
+        write_details_json(&results, Duration::from_millis(25), &root, &config.privacy)
             .expect("details json should be written");
         let json =
             fs::read_to_string(root.join("details.json")).expect("details json should exist");
@@ -411,7 +464,7 @@ mod reporter_tests {
             "tests/example.rs:L42"
         );
         assert_eq!(json["failed"][0]["panic"]["line"], 45);
-        assert_eq!(json["schema_version"], 3);
+        assert_eq!(json["schema_version"], 4);
         assert_eq!(json["summary"]["total"], 2);
         assert_eq!(json["summary"]["failed"], 1);
         assert_eq!(json["summary"]["successful"], false);
@@ -445,8 +498,13 @@ mod reporter_tests {
         let root = create_temp_project("assertion_details");
         let results = vec![assert_eq_failed_result(1)];
 
-        write_details_json(&results, Duration::from_millis(8), &root)
-            .expect("details json should be written");
+        write_details_json(
+            &results,
+            Duration::from_millis(8),
+            &root,
+            &TesterConfig::default().privacy,
+        )
+        .expect("details json should be written");
 
         let json =
             fs::read_to_string(root.join("details.json")).expect("details json should exist");
@@ -574,6 +632,8 @@ fn failed_result(id: usize) -> TestResult {
         failure: Some(FailureOutput {
             stdout: "thread panicked".to_owned(),
             stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
             exit_code: Some(101),
             panic: Some(PanicDetails {
                 file: "tests/example.rs".to_owned(),
@@ -607,6 +667,8 @@ assertion `left == right` failed: demo failure: expected one more discovered tes
 "
             .to_owned(),
             stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
             exit_code: Some(101),
             panic: Some(PanicDetails {
                 file: "tests/example.rs".to_owned(),
