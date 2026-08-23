@@ -34,8 +34,6 @@ Ver los detalles de los tests fallidos:
 cargo tester --details
 ```
 
-![details](./assets/details.png)
-
 ## Características
 
 - Tabla estable con archivo, familia, nombre, estado y duración.
