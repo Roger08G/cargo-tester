@@ -15,19 +15,21 @@ pub fn render_github_annotations(results: &[TestResult]) -> Option<String> {
             let file = panic.map_or(result.file.as_str(), |panic| panic.file.as_str());
             let file = sanitize_path(file, true);
             let line = panic.map(|panic| panic.line).or(result.line);
-            let message = panic
-                .and_then(|panic| panic.message.as_deref())
-                .unwrap_or("Rust test failed");
-            let message = sanitize_text(message, true);
+            // Panic text and assertion values are arbitrary user data; pattern
+            // redaction cannot guarantee they contain no secrets.
+            let message = "Rust test failed";
             let mut properties = format!(
                 "file={},title={}",
                 escape_property(&file),
-                escape_property(&format!("Test failed: {}", result.full_name))
+                escape_property(&format!(
+                    "Test failed: {}",
+                    sanitize_text(&result.full_name, true)
+                ))
             );
             if let Some(line) = line {
                 properties.push_str(&format!(",line={line}"));
             }
-            format!("::error {properties}::{}", escape_data(&message))
+            format!("::error {properties}::{}", escape_data(message))
         })
         .collect::<Vec<_>>();
 

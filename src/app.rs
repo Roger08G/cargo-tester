@@ -1,5 +1,5 @@
 use std::{
-    env,
+    env, fs,
     io::{self, IsTerminal},
     process::ExitCode,
     time::{Duration, Instant},
@@ -44,6 +44,19 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
     }
     config.output.color &= terminal_supports_color(&cli);
 
+    // Load rerun selection before removing private persisted arguments. Cleanup
+    // also runs for empty selections and compilation failures.
+    let previous_run = {
+        let _output_lock = OutputLock::acquire(&config.output.output_path)?;
+        let previous = cli
+            .last_failed
+            .then(|| load_last_run(&config.output.output_path));
+        if cli.ci {
+            prepare_ci_output(&config.output.output_path)?;
+        }
+        previous.transpose()?.flatten()
+    };
+
     if cli.history {
         let _output_lock = OutputLock::acquire(&config.output.output_path)?;
         println!(
@@ -58,7 +71,7 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
     let mut cargo_args = cli.cargo_args.clone();
     let mut harness_args = cli.harness_args.clone();
     let previous_failures = if cli.last_failed {
-        match load_last_run(&config.output.output_path)? {
+        match previous_run {
             None => {
                 return finish_empty_run(
                     &config,
@@ -132,13 +145,7 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
     let _output_lock = OutputLock::acquire(&config.output.output_path)?;
 
     let mut history = if config.history.enabled {
-        match History::load(&config.output.output_path) {
-            Ok(history) => Some(history),
-            Err(error) => {
-                eprintln!("Warning: test history could not be loaded: {error:#}");
-                Some(History::default())
-            }
-        }
+        Some(History::load(&config.output.output_path)?)
     } else {
         None
     };
@@ -203,6 +210,33 @@ fn run_with_cli(cli: Cli) -> Result<ExitCode> {
     } else {
         ExitCode::SUCCESS
     })
+}
+
+fn prepare_ci_output(output_path: &std::path::Path) -> Result<()> {
+    for name in ["summary.txt", "sumary.txt", "details.json"] {
+        remove_stale_output(&output_path.join(name))?;
+    }
+    for (name, sanitized) in [
+        ("history.json", History::sanitize_existing(output_path)),
+        (
+            "last-run.json",
+            crate::state::sanitize_existing(output_path),
+        ),
+    ] {
+        if sanitized.is_err() {
+            // Unknown/corrupt legacy output cannot safely become a CI artifact.
+            remove_stale_output(&output_path.join(name))?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_stale_output(path: &std::path::Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn terminal_supports_color(cli: &Cli) -> bool {

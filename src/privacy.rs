@@ -15,13 +15,17 @@ static GITHUB_TOKEN: LazyLock<Regex> = LazyLock::new(|| {
 static AWS_ACCESS_KEY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\bAKIA[0-9A-Z]{16}\b").expect("AWS access key regex must be valid")
 });
+static NPM_TOKEN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\bnpm_[A-Za-z0-9]{20,}\b").expect("npm token regex must be valid")
+});
 
 pub(crate) fn sanitize_text(value: &str, redact: bool) -> String {
+    let value = escape_controls(value, false);
     if !redact {
-        return value.to_owned();
+        return value;
     }
 
-    let mut sanitized = value.to_owned();
+    let mut sanitized = value;
     if let Ok(workspace) = env::current_dir() {
         sanitized = replace_path(&sanitized, &workspace, "<workspace>");
     }
@@ -34,13 +38,16 @@ pub(crate) fn sanitize_text(value: &str, redact: bool) -> String {
     sanitized = AWS_ACCESS_KEY
         .replace_all(&sanitized, "<redacted-access-key>")
         .into_owned();
+    sanitized = NPM_TOKEN
+        .replace_all(&sanitized, "<redacted-token>")
+        .into_owned();
     SENSITIVE_ASSIGNMENT
         .replace_all(&sanitized, "$1$2<redacted>")
         .into_owned()
 }
 
 pub(crate) fn sanitize_path(value: &str, redact: bool) -> String {
-    let normalized = value.replace('\\', "/");
+    let normalized = escape_controls(&value.replace('\\', "/"), true);
     if !redact {
         return normalized;
     }
@@ -52,14 +59,33 @@ pub(crate) fn sanitize_path(value: &str, redact: bool) -> String {
 
     if let Ok(workspace) = env::current_dir() {
         if let Some(relative) = strip_path(path, &workspace) {
-            return relative;
+            return escape_controls(&relative, true);
         }
     }
 
     path.file_name().map_or_else(
         || "<external>".to_owned(),
-        |name| format!("<external>/{}", name.to_string_lossy()),
+        |name| {
+            format!(
+                "<external>/{}",
+                escape_controls(&name.to_string_lossy(), true)
+            )
+        },
     )
+}
+
+fn escape_controls(value: &str, single_line: bool) -> String {
+    let mut result = String::with_capacity(value.len());
+    for character in value.chars() {
+        if (character.is_control() && (single_line || !matches!(character, '\n' | '\t')))
+            || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        {
+            result.extend(character.escape_default());
+        } else {
+            result.push(character);
+        }
+    }
+    result
 }
 
 fn strip_path(path: &Path, base: &Path) -> Option<String> {
@@ -100,5 +126,14 @@ mod tests {
             sanitize_path(&path.display().to_string(), true),
             "src/lib.rs"
         );
+    }
+
+    #[test]
+    fn neutralizes_terminal_controls_even_without_redaction() {
+        let text = sanitize_text("\u{1b}]52;c;private\u{7}\rspoof", false);
+        assert!(!text.contains('\u{1b}'));
+        assert!(!text.contains('\u{7}'));
+        assert!(!text.contains('\r'));
+        assert_eq!(sanitize_path("file\nspoof.rs", false), "file\\nspoof.rs");
     }
 }

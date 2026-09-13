@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
-    env, fs,
-    io::ErrorKind,
+    env,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -11,7 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{HistoryConfig, PrivacyConfig},
-    persistence::atomic_write,
+    persistence::{MAX_PERSISTED_BYTES, atomic_write_state, read_text},
+    privacy::sanitize_path,
     runner::{TestResult, TestStatus},
 };
 
@@ -24,6 +24,8 @@ pub struct TestHistory {
     pub full_name: String,
     pub status: String,
     pub duration_ms: u64,
+    #[serde(default)]
+    pub target_source: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -72,12 +74,8 @@ pub struct History {
 impl History {
     pub fn load(output_path: &Path) -> Result<Self> {
         let path = output_path.join(HISTORY_FILE_NAME);
-        let contents = match fs::read_to_string(&path) {
-            Ok(contents) => contents,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Self::default()),
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to read {}", path.display()));
-            }
+        let Some(contents) = read_text(&path, MAX_PERSISTED_BYTES)? else {
+            return Ok(Self::default());
         };
         let mut file: HistoryFile = serde_json::from_str(&contents)
             .with_context(|| format!("failed to parse {}", path.display()))?;
@@ -108,14 +106,40 @@ impl History {
             .tests
             .iter()
             .filter(|test| test.status == TestStatus::Pass.label())
-            .map(|test| (test.full_name.as_str(), test.duration_ms))
+            .map(|test| {
+                (
+                    (test.full_name.as_str(), test.target_source.as_deref()),
+                    test.duration_ms,
+                )
+            })
             .collect::<HashMap<_, _>>();
+        let mut current_name_counts = HashMap::new();
+        for result in results {
+            *current_name_counts
+                .entry(result.full_name.as_str())
+                .or_insert(0_usize) += 1;
+        }
+        let mut previous_name_counts = HashMap::new();
+        for test in &previous.tests {
+            *previous_name_counts
+                .entry(test.full_name.as_str())
+                .or_insert(0_usize) += 1;
+        }
 
         let mut regressions = results
             .iter()
             .filter(|result| result.status == TestStatus::Pass)
             .filter_map(|result| {
-                let previous_ms = *previous_tests.get(result.full_name.as_str())?;
+                let target = sanitize_path(&result.target_source.to_string_lossy(), true);
+                let previous_ms = previous_tests
+                    .get(&(result.full_name.as_str(), Some(target.as_str())))
+                    .or_else(|| {
+                        (current_name_counts.get(result.full_name.as_str()) == Some(&1)
+                            && previous_name_counts.get(result.full_name.as_str()) == Some(&1))
+                        .then(|| previous_tests.get(&(result.full_name.as_str(), None)))
+                        .flatten()
+                    })
+                    .copied()?;
                 let previous_duration = Duration::from_millis(previous_ms);
                 if previous_duration < config.minimum_test_duration()
                     || result.duration <= previous_duration
@@ -188,6 +212,10 @@ impl History {
                     full_name: result.full_name.clone(),
                     status: result.status.label().to_owned(),
                     duration_ms: duration_ms(result.duration),
+                    target_source: Some(sanitize_path(
+                        &result.target_source.to_string_lossy(),
+                        true,
+                    )),
                 })
                 .collect(),
         });
@@ -203,7 +231,22 @@ impl History {
         let path = output_path.join(HISTORY_FILE_NAME);
         let json =
             serde_json::to_string_pretty(&self.file).context("failed to serialize test history")?;
-        atomic_write(&path, format!("{}\n", json.trim_end()).as_bytes())
+        atomic_write_state(&path, format!("{}\n", json.trim_end()).as_bytes())
+    }
+
+    pub(crate) fn sanitize_existing(output_path: &Path) -> Result<()> {
+        let mut history = Self::load(output_path)?;
+        for run in &mut history.file.runs {
+            run.working_directory = None;
+            run.arguments.clear();
+            for test in &mut run.tests {
+                test.target_source = test
+                    .target_source
+                    .as_ref()
+                    .map(|path| sanitize_path(path, true));
+            }
+        }
+        history.write(output_path)
     }
 }
 

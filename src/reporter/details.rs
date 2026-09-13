@@ -30,7 +30,7 @@ pub fn render_failure_details(results: &[TestResult], config: &TesterConfig) -> 
 
 fn append_failure_card(details: &mut String, result: &TestResult, style: &DetailStyle) {
     details.push('\n');
-    details.push_str(&style.card_header(result.id, &result.test));
+    details.push_str(&style.card_header(result.id, &sanitize_text(&result.test, style.redact)));
     details.push('\n');
     append_field(details, style, "Family", &result.family);
     append_field(details, style, "Test", &result.test);
@@ -68,7 +68,11 @@ fn append_failure_card(details: &mut String, result: &TestResult, style: &Detail
 }
 
 fn append_failure_output(details: &mut String, failure: &FailureOutput, style: &DetailStyle) {
-    if let Some(panic) = &failure.panic {
+    if let Some(panic) = failure
+        .panic
+        .as_ref()
+        .filter(|_| style.include_captured_output)
+    {
         append_section(details, style, "Panic");
         if let Some(message) = &panic.message {
             append_field(
@@ -131,7 +135,7 @@ fn append_field(details: &mut String, style: &DetailStyle, label: &str, value: &
     details.push(' ');
     details.push_str(&style.label(&format!("{label}:")));
     details.push(' ');
-    details.push_str(value);
+    details.push_str(&sanitize_text(value, style.redact));
     details.push('\n');
 }
 

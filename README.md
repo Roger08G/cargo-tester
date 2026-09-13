@@ -53,7 +53,7 @@ cargo tester --details
 Con Cargo, fijando la versión de producción:
 
 ```console
-cargo install --git https://github.com/Roger08G/cargo-tester --tag v1.0.0 --locked
+cargo install --git https://github.com/Roger08G/cargo-tester --tag v1.1.0 --locked
 ```
 
 Desde una copia local del repositorio:
@@ -63,7 +63,7 @@ cargo install --path . --locked
 ```
 
 En Windows x86-64 se puede usar el instalador
-`cargo-tester-v1.0.0-windows-x86_64-setup.exe` publicado en
+`cargo-tester-v1.1.0-windows-x86_64-setup.exe` publicado en
 [GitHub Releases](https://github.com/Roger08G/cargo-tester/releases/latest). Instala `cargo-tester.exe` en el
 directorio `bin` de `CARGO_HOME` o, si la variable no está definida, en
 `%USERPROFILE%\.cargo\bin`.
@@ -73,11 +73,11 @@ archivo fuente explícito y `SHA256SUMS.txt`. Verifica el instalador antes de
 ejecutarlo:
 
 ```powershell
-(Get-FileHash .\cargo-tester-v1.0.0-windows-x86_64-setup.exe -Algorithm SHA256).Hash
+(Get-FileHash .\cargo-tester-v1.1.0-windows-x86_64-setup.exe -Algorithm SHA256).Hash
 Get-Content .\SHA256SUMS.txt
 ```
 
-Los binarios de v1.0.0 no están firmados con Authenticode. Windows puede mostrar
+Los binarios de v1.1.0 no están firmados con Authenticode. Windows puede mostrar
 una advertencia; comprueba siempre el SHA-256 descargado desde el release.
 
 Después de instalarlo, el comando queda disponible globalmente:
@@ -272,6 +272,10 @@ argumentos de ejecución en los artefactos. El saneamiento es una defensa en
 profundidad, no una garantía para texto arbitrario; los tests no deben imprimir
 secretos. Consulta [SECURITY.md](SECURITY.md) antes de publicar artefactos.
 
+Desde 1.1.0 también se omiten el mensaje libre del panic y los operandos de las
+aserciones en CI. Al iniciar una ejecución CI se invalidan reportes anteriores y
+se sanea el historial para no subir datos locales antiguos si la compilación falla.
+
 ### Historial y regresiones
 
 `history.json` conserva como máximo `max-runs` ejecuciones. `cargo tester
@@ -320,6 +324,9 @@ su fallo.
 Las escrituras se realizan mediante reemplazo atómico. Un bloqueo común por
 directorio de salida serializa las actualizaciones de ejecuciones concurrentes,
 evitando JSON parcial y pérdidas del historial.
+El bloqueo está dentro del destino canónico y espera como máximo 10 segundos;
+las lecturas de historial y estado rechazan archivos especiales, enlaces y
+archivos mayores de 16 MiB. En Unix los reportes nuevos tienen permisos `0600`.
 
 ## Integración continua
 
@@ -331,7 +338,7 @@ cargo tester --ci --workspace --all-features
 ```
 
 Cuando `GITHUB_ACTIONS` está definido, cada fallo se publica además como una
-anotación con archivo, línea, nombre y mensaje.
+anotación con archivo, línea, nombre y un mensaje fijo sin texto privado del panic.
 
 Este repositorio incluye:
 
@@ -352,7 +359,7 @@ Este repositorio incluye:
 ```console
 cargo fmt --all -- --check
 cargo test --locked
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo package --locked
 ```
 
@@ -388,6 +395,7 @@ src/
 
 Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para preparar cambios y
 [SECURITY.md](SECURITY.md) para reportar problemas de seguridad.
+La revisión y sus límites están en la [auditoría 1.1.0](docs/SECURITY_AUDIT_1.1.0.md).
 
 ## Licencia
 

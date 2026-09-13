@@ -1,7 +1,5 @@
 use std::{
     collections::HashSet,
-    fs,
-    io::ErrorKind,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -10,8 +8,9 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    cli::Cli,
     config::PrivacyConfig,
-    persistence::atomic_write,
+    persistence::{MAX_PERSISTED_BYTES, atomic_write_state, read_text},
     privacy::sanitize_path,
     runner::{TestCase, TestResult},
 };
@@ -85,12 +84,8 @@ struct LastRunState {
 
 pub fn load_last_run(output_path: &Path) -> Result<Option<PreviousRun>> {
     let path = output_path.join(LAST_RUN_FILE_NAME);
-    let contents = match fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", path.display()));
-        }
+    let Some(contents) = read_text(&path, MAX_PERSISTED_BYTES)? else {
+        return Ok(None);
     };
     let state: LastRunState = serde_json::from_str(&contents)
         .with_context(|| format!("failed to parse {}", path.display()))?;
@@ -102,12 +97,42 @@ pub fn load_last_run(output_path: &Path) -> Result<Option<PreviousRun>> {
         );
     }
 
+    let parsed = Cli::parse_from(
+        state
+            .cargo_args
+            .iter()
+            .cloned()
+            .chain(std::iter::once("--".to_owned()))
+            .chain(state.harness_args.iter().cloned()),
+    )
+    .context("last-run.json contains unsupported execution arguments")?;
+    if parsed.cargo_args != state.cargo_args || parsed.harness_args != state.harness_args {
+        bail!("last-run.json contains invalid stored Cargo arguments");
+    }
+
     Ok(Some(PreviousRun {
         failed_tests: state.failed_tests,
         redacted: state.redacted,
         cargo_args: state.cargo_args,
         harness_args: state.harness_args,
     }))
+}
+
+pub(crate) fn sanitize_existing(output_path: &Path) -> Result<()> {
+    let path = output_path.join(LAST_RUN_FILE_NAME);
+    let Some(contents) = read_text(&path, MAX_PERSISTED_BYTES)? else {
+        return Ok(());
+    };
+    let mut state: LastRunState = serde_json::from_str(&contents)?;
+    state.redacted = true;
+    state.cargo_args.clear();
+    state.harness_args.clear();
+    for test in &mut state.failed_tests {
+        if let StoredFailedTest::Detailed { target_source, .. } = test {
+            *target_source = sanitize_path(target_source, true);
+        }
+    }
+    atomic_write_state(&path, serde_json::to_string_pretty(&state)?.as_bytes())
 }
 
 pub fn load_failed_tests(output_path: &Path) -> Result<Option<HashSet<String>>> {
@@ -166,7 +191,7 @@ pub(crate) fn write_last_run_with_privacy(
     let json = serde_json::to_string_pretty(&state).context("failed to serialize last run")?;
 
     let path = output_path.join(LAST_RUN_FILE_NAME);
-    atomic_write(&path, format!("{}\n", json.trim_end()).as_bytes())
+    atomic_write_state(&path, format!("{}\n", json.trim_end()).as_bytes())
 }
 
 fn target_key(path: &Path) -> String {

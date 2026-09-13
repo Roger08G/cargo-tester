@@ -217,12 +217,22 @@ impl FailedTestDetails {
         let assertion = failure
             .and_then(parse_assertion_details)
             .map(|mut assertion| {
-                assertion.left = assertion
-                    .left
-                    .map(|value| sanitize_text(&value, privacy.redact));
-                assertion.right = assertion
-                    .right
-                    .map(|value| sanitize_text(&value, privacy.redact));
+                assertion.left = privacy
+                    .include_captured_output
+                    .then(|| {
+                        assertion
+                            .left
+                            .map(|value| sanitize_text(&value, privacy.redact))
+                    })
+                    .flatten();
+                assertion.right = privacy
+                    .include_captured_output
+                    .then(|| {
+                        assertion
+                            .right
+                            .map(|value| sanitize_text(&value, privacy.redact))
+                    })
+                    .flatten();
                 assertion
             });
 
@@ -321,10 +331,15 @@ impl PanicLocation {
             path: formatting::source_path(&file, Some(panic.line)),
             line: panic.line,
             column: panic.column,
-            message: panic
-                .message
-                .as_ref()
-                .map(|message| sanitize_text(message, privacy.redact)),
+            message: privacy
+                .include_captured_output
+                .then(|| {
+                    panic
+                        .message
+                        .as_ref()
+                        .map(|message| sanitize_text(message, privacy.redact))
+                })
+                .flatten(),
             source_line: privacy
                 .include_source_context
                 .then(|| {

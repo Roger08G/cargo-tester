@@ -189,6 +189,36 @@ fn validate_harness_args(args: &[String]) -> Result<()> {
         bail!("test harness option {argument} is managed by cargo-tester");
     }
 
+    let mut arguments = args.iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--ignored" | "--include-ignored" | "--nocapture" | "--show-output" => {}
+            "--test-threads" => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| anyhow!("--test-threads requires a positive integer"))?;
+                validate_test_threads(value)?;
+            }
+            value if value.starts_with("--test-threads=") => {
+                validate_test_threads(&value["--test-threads=".len()..])?;
+            }
+            _ => bail!(
+                "unsupported test harness argument {argument}; supported options: --ignored, --include-ignored, --nocapture, --show-output, --test-threads"
+            ),
+        }
+    }
+    if args.iter().any(|arg| arg == "--ignored")
+        && args.iter().any(|arg| arg == "--include-ignored")
+    {
+        bail!("--ignored and --include-ignored cannot be combined");
+    }
+    Ok(())
+}
+
+fn validate_test_threads(value: &str) -> Result<()> {
+    if value.parse::<usize>().ok().is_none_or(|value| value == 0) {
+        bail!("--test-threads requires a positive integer");
+    }
     Ok(())
 }
 

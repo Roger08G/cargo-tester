@@ -71,6 +71,133 @@ mod cli_features {
         assert!(duplicate.to_string().contains("only be used once"));
         assert!(missing.to_string().contains("requires a value"));
     }
+
+    #[test]
+    fn rejects_harness_flags_that_change_the_execution_contract() {
+        for arguments in [
+            vec!["--", "--help"],
+            vec!["--", "extra-filter"],
+            vec!["--", "--ignored", "--include-ignored"],
+            vec!["--", "--test-threads=0"],
+            vec!["--", "--test-threads"],
+            vec!["--", "--bench"],
+        ] {
+            assert!(Cli::parse_from(arguments).is_err());
+        }
+        assert!(Cli::parse_from(["--", "--include-ignored", "--test-threads", "2"]).is_ok());
+    }
+}
+
+#[test]
+fn refuses_unvalidated_persisted_execution_arguments() {
+    let root = temp_dir("invalid_saved_arguments");
+    fs::write(
+        root.join("last-run.json"),
+        r#"{
+        "schema_version": 3, "generated_at_unix_ms": 0,
+        "failed_tests": ["case"], "cargo_args": ["--help"], "harness_args": []
+    }"#,
+    )
+    .unwrap();
+    assert!(load_last_run(&root).is_err());
+    fs::write(
+        root.join("last-run.json"),
+        r#"{
+        "schema_version": 3, "generated_at_unix_ms": 0,
+        "failed_tests": ["case"], "cargo_args": [], "harness_args": ["--help"]
+    }"#,
+    )
+    .unwrap();
+    assert!(load_last_run(&root).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn performance_history_distinguishes_duplicate_names_by_target() {
+    let root = temp_dir("history_target_identity");
+    let config = TesterConfig::default();
+    let mut first = result(1, TestStatus::Pass, 1000);
+    let mut second = result(2, TestStatus::Pass, 10_000);
+    first.full_name = "duplicate".into();
+    second.full_name = "duplicate".into();
+    first.target_source = "member-a/src/lib.rs".into();
+    second.target_source = "member-b/src/lib.rs".into();
+    let mut history = History::load(&root).unwrap();
+    history
+        .record(
+            &[first, second],
+            Duration::from_secs(10),
+            &config.history,
+            &config.privacy,
+            &root,
+        )
+        .unwrap();
+    let mut current = result(1, TestStatus::Pass, 3000);
+    current.full_name = "duplicate".into();
+    current.target_source = "member-a/src/lib.rs".into();
+    let regressions = history.regressions(&[current], &config.history);
+    assert_eq!(regressions.len(), 1);
+    assert_eq!(regressions[0].previous_duration, Duration::from_secs(1));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+fn refuses_symlink_output_files_without_modifying_the_target() {
+    use std::os::unix::fs::symlink;
+    let root = temp_dir("output_symlink");
+    let victim = root.join("private-file");
+    fs::write(&victim, "private data").unwrap();
+    symlink(&victim, root.join("summary.txt")).unwrap();
+    assert!(write_report("new report", &root).is_err());
+    assert_eq!(fs::read_to_string(victim).unwrap(), "private data");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn source_index_skips_large_files_and_keeps_valid_locations() {
+    let root = temp_dir("bounded_source_index");
+    fs::write(root.join("huge.rs"), " ".repeat(1024 * 1024 + 1)).unwrap();
+    fs::write(root.join("valid.rs"), "#[test]\nfn small() {}\n").unwrap();
+    let index = cargo_tester::source::SourceIndex::build(root.clone()).unwrap();
+    assert_eq!(
+        index.location_for("small", &root.join("valid.rs")).line,
+        Some(2)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+#[ignore = "manual source indexing benchmark; run with --ignored --nocapture"]
+fn benchmark_source_index_line_lookup() {
+    let root = temp_dir("source_index_benchmark");
+    let source: String = (0..2000)
+        .map(|index| format!("#[test]\nfn case_{index}() {{}}\n"))
+        .collect();
+    fs::write(root.join("large.rs"), &source).unwrap();
+    let started = std::time::Instant::now();
+    for (offset, _) in source.match_indices("fn case_") {
+        let line = source[..offset]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+            + 1;
+        std::hint::black_box(source.lines().nth(line - 1));
+    }
+    let rescanning = started.elapsed();
+    let started = std::time::Instant::now();
+    let index = cargo_tester::source::SourceIndex::build(root.clone()).unwrap();
+    let indexed = started.elapsed();
+    assert_eq!(
+        index.location_for("case_1999", &root.join("large.rs")).line,
+        Some(4000)
+    );
+    println!(
+        "source index: tests=2000 old_line_lookup_ms={} new_full_index_ms={}",
+        rescanning.as_millis(),
+        indexed.as_millis()
+    );
+    fs::remove_dir_all(root).unwrap();
 }
 
 mod config_features {
@@ -340,7 +467,8 @@ mod reporter_features {
 
         assert!(output.starts_with("::error file=tests/example.rs"));
         assert!(output.contains("line=14"));
-        assert!(output.ends_with("::expected 1, got 2"));
+        assert!(output.ends_with("::Rust test failed"));
+        assert!(!output.contains("expected 1, got 2"));
     }
 }
 

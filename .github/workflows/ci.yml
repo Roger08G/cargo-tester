@@ -34,6 +34,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
         shell: bash
@@ -64,6 +66,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
         run: |
@@ -87,7 +91,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Enforce release-file policy for main
         if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
@@ -100,7 +104,9 @@ jobs:
         run: cargo install --path . --locked --force
 
       - name: Run cargo-tester end-to-end
-        run: cargo tester --ci
+        run: |
+          rm -f -- .cargo/tester-output/summary.txt .cargo/tester-output/details.json .cargo/tester-output/history.json .cargo/tester-output/last-run.json
+          cargo tester --ci
 
       - name: Upload cargo-tester reports
         if: always()
@@ -124,6 +130,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust 1.85.0
         run: |
@@ -156,6 +164,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Audit Rust dependencies
         uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0

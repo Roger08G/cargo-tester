@@ -27,6 +27,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust stable
         run: |
@@ -54,7 +56,7 @@ jobs:
         run: cargo test --locked
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Verify package
         run: cargo package --locked
@@ -77,12 +79,14 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-          - os: macos-latest
+          - os: macos-15-intel
             target: x86_64-apple-darwin
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust target
         shell: bash
@@ -93,6 +97,9 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Test on the release platform
+        run: cargo test --locked
 
       - name: Package portable archive
         shell: pwsh
@@ -227,6 +234,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Download release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -256,11 +265,7 @@ jobs:
         run: |
           title="Production ${GITHUB_REF_NAME}"
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release edit "${GITHUB_REF_NAME}" \
-              --title "$title" \
-              --notes-file CHANGELOG.md \
-              --latest
-            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+            node scripts/verify-release-assets.mjs dist
           else
             gh release create "${GITHUB_REF_NAME}" dist/* \
               --verify-tag \
@@ -268,3 +273,8 @@ jobs:
               --notes-file CHANGELOG.md \
               --latest
           fi
+
+      - name: Verify published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release-assets.mjs dist

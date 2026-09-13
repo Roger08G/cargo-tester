@@ -208,7 +208,7 @@ pub fn discover_tests(options: DiscoveryOptions<'_>) -> Result<Vec<TestCase>> {
         } else {
             has_custom_harness_output(&output.stdout)
         };
-        if !recognized && unsupported_harness {
+        if unsupported_harness {
             bail!(
                 "unsupported test harness output from {}; cargo-tester supports the standard libtest harness only",
                 artifact_display
@@ -365,7 +365,6 @@ fn run_single_test_with_args(
         &format!("test {}", test_case.full_name),
     )?;
     let duration = started.elapsed();
-    let combined = combined_output(&output);
 
     if output.termination == Termination::Cancelled {
         bail!("test execution cancelled");
@@ -374,8 +373,8 @@ fn run_single_test_with_args(
     let status = if output.termination == Termination::TimedOut {
         TestStatus::Timeout
     } else if output.success() {
-        let passed = summary_count(&combined, "passed");
-        let ignored = summary_count(&combined, "ignored");
+        let passed = summary_count(&output.stdout_tail, "passed");
+        let ignored = summary_count(&output.stdout_tail, "ignored");
 
         if ignored == 1 && passed == 0 {
             TestStatus::Ignored
@@ -388,7 +387,10 @@ fn run_single_test_with_args(
         TestStatus::Fail
     };
     let failure = if status.is_failure() {
-        let mut stderr = output.stderr.clone();
+        let panic =
+            PanicDetails::parse(&output.stderr).or_else(|| PanicDetails::parse(&output.stdout));
+        let exit_code = output.exit_code();
+        let mut stderr = output.stderr;
         if status == TestStatus::Timeout {
             if !stderr.is_empty() && !stderr.ends_with('\n') {
                 stderr.push('\n');
@@ -399,12 +401,12 @@ fn run_single_test_with_args(
             ));
         }
         Some(FailureOutput {
-            stdout: output.stdout.clone(),
+            stdout: output.stdout,
             stderr,
             stdout_truncated: output.stdout_truncated,
             stderr_truncated: output.stderr_truncated,
-            exit_code: output.exit_code(),
-            panic: PanicDetails::parse(&combined),
+            exit_code,
+            panic,
         })
     } else {
         None
@@ -446,7 +448,9 @@ pub fn has_failures(results: &[TestResult]) -> bool {
 fn summary_count(output: &str, label: &str) -> u32 {
     output
         .lines()
-        .filter(|line| line.contains("test result:"))
+        .rev()
+        .find(|line| line.starts_with("test result: ok. "))
+        .into_iter()
         .flat_map(|line| line.split(';'))
         .find_map(|part| {
             let mut previous = None;
@@ -522,7 +526,7 @@ fn test_artifacts(stdout: &[u8]) -> Result<Vec<TestArtifact>> {
 }
 
 fn combined_output(output: &ProcessOutput) -> String {
-    format!("{}{}", output.stdout, output.stderr)
+    format!("{}\n{}", output.stdout, output.stderr)
 }
 
 fn parse_panic_details(output: &str) -> Option<PanicDetails> {
@@ -583,6 +587,9 @@ fn cargo_error(
     json_stdout: bool,
     redact: bool,
 ) -> anyhow::Error {
+    if redact {
+        return anyhow!("{message}\nChild diagnostic output omitted by the privacy policy");
+    }
     let details = if json_stdout {
         output
             .stdout
@@ -616,7 +623,9 @@ fn discovery_harness_args(args: &[String]) -> impl Iterator<Item = &str> {
 fn has_custom_harness_output(output: &str) -> bool {
     output.lines().map(str::trim).any(|line| {
         !line.is_empty()
-            && !(line.ends_with("tests, 0 benchmarks")
+            && !(line.ends_with(": test")
+                || line.ends_with(": benchmark")
+                || line.ends_with("tests, 0 benchmarks")
                 || line.ends_with("test, 0 benchmarks")
                 || line.ends_with("benchmarks"))
     })

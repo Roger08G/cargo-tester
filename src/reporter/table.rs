@@ -8,7 +8,7 @@ use comfy_table::{
 use crate::{
     config::TesterConfig,
     formatting,
-    privacy::sanitize_path,
+    privacy::{sanitize_path, sanitize_text},
     runner::{TestResult, TestStatus},
 };
 
@@ -53,8 +53,11 @@ pub fn render_report_with_filter(
                 &sanitize_path(&result.file, config.privacy.redact),
                 config.output.color,
             ),
-            muted_cell(&result.family, config.output.color),
-            Cell::new(&result.test),
+            muted_cell(
+                &sanitize_text(&result.family, config.privacy.redact),
+                config.output.color,
+            ),
+            Cell::new(sanitize_text(&result.test, config.privacy.redact)),
             status_cell(result.status, config.output.color),
             duration_cell(result.duration, config),
         ]);

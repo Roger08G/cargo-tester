@@ -115,6 +115,22 @@ mod tests {
     }
 
     #[test]
+    fn passes_with_massive_output() {
+        println!("test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out");
+        print!("{}", "x".repeat(2_000_000));
+    }
+
+    #[test]
+    fn exits_with_inherited_child_pipes() {
+        #[cfg(windows)]
+        let _child = std::process::Command::new("cmd")
+            .args(["/C", "ping -n 11 127.0.0.1 >NUL"]).spawn().unwrap();
+        #[cfg(unix)]
+        let _child = std::process::Command::new("sh")
+            .args(["-c", "sleep 10"]).spawn().unwrap();
+    }
+
+    #[test]
     fn hangs() {
         #[cfg(windows)]
         let _child = std::process::Command::new("cmd")
@@ -160,6 +176,102 @@ mod tests {
     let details = fixture.details();
     assert_eq!(details["summary"]["timed_out"], 1);
     assert_eq!(details["failed"][0]["status"], "TIMEOUT");
+
+    fixture.write("tester.toml", &standard_config("5s", 1));
+    let flood_started = Instant::now();
+    let passing_flood = run_tester(&fixture.root, &["--ci", "passes_with_massive_output"]);
+    assert_success(&passing_flood, "passing output beyond the capture limit");
+    assert_eq!(fixture.details()["summary"]["passed"], 1);
+    println!(
+        "passing flood: 2000000 bytes, capture limit=1 byte, elapsed_ms={}",
+        flood_started.elapsed().as_millis()
+    );
+
+    fixture.write("tester.toml", &standard_config("300ms", 32_768));
+    let child_started = Instant::now();
+    let child = run_tester(&fixture.root, &["--ci", "exits_with_inherited_child_pipes"]);
+    assert_success(&child, "normal exit with inherited descendant pipes");
+    assert!(child_started.elapsed() < Duration::from_secs(5));
+    println!(
+        "leader exit cleanup: descendant sleep=10s, elapsed_ms={}",
+        child_started.elapsed().as_millis()
+    );
+}
+
+#[test]
+fn ci_omits_unstructured_secrets_and_cleans_stale_local_reports() {
+    let _guard = e2e_guard();
+    let fixture = Fixture::package("ci_stale_privacy");
+    fixture.write("src/lib.rs", r#"
+#[test]
+fn arbitrary_sensitive_assertion() { assert_eq!("private customer data 4239", "private customer data 5871"); }
+#[test]
+fn arbitrary_sensitive_panic() { panic!("private customer data 9017"); }
+"#);
+    fixture.write("tester.toml", &standard_config("5s", 262_144));
+    let local = run_tester(&fixture.root, &["--details"]);
+    assert!(!local.status.success());
+    assert!(
+        fixture
+            .details()
+            .to_string()
+            .contains("private customer data")
+    );
+
+    let ci = tester_command(&fixture.root)
+        .args(["--ci", "--details"])
+        .env("GITHUB_ACTIONS", "true")
+        .output()
+        .unwrap();
+    assert!(!ci.status.success());
+    assert!(!output_text(&ci).contains("private customer data"));
+    assert!(
+        !fixture
+            .details()
+            .to_string()
+            .contains("private customer data")
+    );
+
+    let local = run_tester(&fixture.root, &["--details"]);
+    assert!(!local.status.success());
+    let empty = run_tester(&fixture.root, &["--ci", "does_not_exist"]);
+    assert_success(&empty, "empty CI selection");
+    assert_ci_artifacts_contain_no_private_data(&fixture);
+
+    let local = run_tester(&fixture.root, &["--details"]);
+    assert!(!local.status.success());
+    fixture.write(
+        "src/lib.rs",
+        "compile_error!(\"private customer data in source\");\n",
+    );
+    let failed = run_tester(&fixture.root, &["--ci"]);
+    assert!(!failed.status.success());
+    assert!(!output_text(&failed).contains("private customer data"));
+    assert_ci_artifacts_contain_no_private_data(&fixture);
+}
+
+fn assert_ci_artifacts_contain_no_private_data(fixture: &Fixture) {
+    for name in [
+        "summary.txt",
+        "details.json",
+        "history.json",
+        "last-run.json",
+    ] {
+        let path = fixture.root.join(".cargo/tester-output").join(name);
+        if let Ok(contents) = fs::read_to_string(path) {
+            assert!(
+                !contents.contains("private customer data"),
+                "private text in {name}"
+            );
+            if name.ends_with(".json") {
+                let value: Value = serde_json::from_str(&contents).unwrap();
+                assert!(
+                    !json_contains_text(&value, &fixture.root.to_string_lossy()),
+                    "absolute path in {name}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -360,6 +472,27 @@ fn concurrent_runs_keep_history_valid_and_complete() {
             .len(),
         2
     );
+}
+
+#[test]
+fn invalid_local_history_is_preserved_and_reported() {
+    let _guard = e2e_guard();
+    let fixture = Fixture::package("preserved_invalid_history");
+    fixture.write("src/lib.rs", "#[test] fn passes() {}\n");
+    fixture.write("tester.toml", &standard_config("5s", 262_144));
+    for previous in [
+        "corrupt existing history",
+        r#"{"schema_version":255,"runs":[]}"#,
+    ] {
+        fixture.write(".cargo/tester-output/history.json", previous);
+        let output = run_tester(&fixture.root, &["--details"]);
+        assert!(!output.status.success(), "invalid history must be reported");
+        assert!(output_text(&output).contains("history.json"));
+        assert_eq!(
+            fs::read_to_string(fixture.root.join(".cargo/tester-output/history.json")).unwrap(),
+            previous
+        );
+    }
 }
 
 #[test]

@@ -32,6 +32,12 @@ puede aumentar el uso de memoria y el orden no coincide necesariamente con
   no bloquee al hijo; los tests se lanzan con `--nocapture` para evitar una
   segunda acumulación ilimitada dentro de `libtest`, y el reporte marca qué
   stream fue truncado.
+- El parser conserva aparte una cola de stdout de 1 KiB para clasificar el
+  resultado de `libtest` aunque se trunque la salida visible. Esto no amplía la
+  captura publicada ni elimina la dependencia del harness estándar.
+- También al salir correctamente el proceso principal se limpia su grupo. La
+  terminación y el drenaje tienen cada uno una gracia de hasta un segundo, para
+  no esperar indefinidamente por tuberías heredadas.
 - Un timeout tiene estado `TIMEOUT`, cuenta por separado de `FAIL` y produce un
   código de salida fallido.
 
@@ -67,3 +73,20 @@ El resultado imprime tiempos y ratio de esa máquina. No es una garantía de
 rendimiento: para una comparación seria se deben repetir muestras en el hardware
 y la carga reales del proyecto, observando también memoria máxima. La CI ejecuta
 los contratos funcionales, pero no falla por un ratio de tiempo inestable.
+
+El índice fuente recorre cada archivo una sola vez, evita volver a recorrer sus
+líneas por cada declaración y aplica un presupuesto global. El benchmark
+`cargo test --locked --test features benchmark_source_index_line_lookup -- --ignored --nocapture`
+permite observar este coste
+de forma independiente; no mide el consumo de memoria de los tests ejecutados.
+
+### Muestra local de la auditoría 1.1.0 (2026-09-13)
+
+En Windows x64 con Rust 1.97.1, sobre el fixture de 24 tests triviales y cinco
+muestras: `cargo test` obtuvo una mediana de 54 ms y `cargo-tester` de 910 ms
+(ratio 16,71). El aislamiento por test penaliza claramente esta carga.
+
+En el microbenchmark fuente de 2.000 declaraciones, la búsqueda de líneas del
+algoritmo anterior tardó 1.014 ms frente a 31 ms del índice completo nuevo.
+Es una muestra en build debug, no un benchmark de toda la herramienta ni una
+garantía de aceleración. No se ha medido RSS pico en esta auditoría.

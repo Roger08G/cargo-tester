@@ -1,8 +1,8 @@
-use std::fs;
+use std::{env, fs, path::Path};
 
 use serde::Serialize;
 
-use crate::runner::FailureOutput;
+use crate::{runner::FailureOutput, source::read_source_file};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(super) struct AssertionDetails {
@@ -46,7 +46,7 @@ pub(super) fn parse_assertion_details(failure: &FailureOutput) -> Option<Asserti
 }
 
 pub(super) fn source_line_at(file: &str, line: usize) -> Option<String> {
-    fs::read_to_string(file).ok().and_then(|contents| {
+    workspace_source(file).and_then(|contents| {
         contents
             .lines()
             .nth(line.saturating_sub(1))
@@ -56,7 +56,7 @@ pub(super) fn source_line_at(file: &str, line: usize) -> Option<String> {
 }
 
 pub(super) fn source_context_at(file: &str, line: usize, radius: usize) -> Vec<SourceContextLine> {
-    let Ok(contents) = fs::read_to_string(file) else {
+    let Some(contents) = workspace_source(file) else {
         return Vec::new();
     };
     let start = line.saturating_sub(radius).max(1);
@@ -78,6 +78,19 @@ pub(super) fn source_context_at(file: &str, line: usize, radius: usize) -> Vec<S
         .collect()
 }
 
+fn workspace_source(file: &str) -> Option<String> {
+    let path = Path::new(file);
+    if path.extension().is_none_or(|extension| extension != "rs") {
+        return None;
+    }
+    let root = fs::canonicalize(env::current_dir().ok()?).ok()?;
+    let resolved = fs::canonicalize(path).ok()?;
+    if !resolved.starts_with(root) {
+        return None;
+    }
+    read_source_file(&resolved)
+}
+
 fn combined_output(failure: &FailureOutput) -> String {
     match (failure.stdout.is_empty(), failure.stderr.is_empty()) {
         (false, false) => format!("{}\n{}", failure.stdout, failure.stderr),
@@ -95,4 +108,19 @@ fn prefixed_output_value(output: &str, prefix: &str) -> Option<String> {
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_external_and_non_rust_context_paths() {
+        assert!(workspace_source("Cargo.toml").is_none());
+        let external =
+            env::temp_dir().join(format!("cargo-tester-context-{}.rs", std::process::id()));
+        fs::write(&external, "private context").unwrap();
+        assert!(workspace_source(&external.to_string_lossy()).is_none());
+        fs::remove_file(external).unwrap();
+    }
 }

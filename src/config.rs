@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, HashSet},
-    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -48,8 +47,7 @@ impl TesterConfig {
             return Ok(Self::default());
         }
 
-        let contents = fs::read_to_string(path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
+        let contents = crate::persistence::read_text(path, 1024 * 1024)?.unwrap_or_default();
         Self::parse(&contents).with_context(|| format!("failed to parse {}", path.display()))
     }
 

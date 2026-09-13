@@ -27,7 +27,7 @@ cargo build --locked
 ```console
 cargo fmt --all -- --check
 cargo test --locked
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo package --locked
 cargo audit
 ```
@@ -53,7 +53,7 @@ cargo tester --features demo-failures --details --group sandbox
 ## Releases
 
 - `Cargo.toml` y el tag deben declarar exactamente la misma versión.
-- Los tags de producción se crean desde una rama `vX.Y.Z` validada por CI.
+- Los tags de producción se crean desde una rama `X.Y.Z` validada por CI.
 - `CHANGELOG.md` vive solo en esas ramas de release y nunca se incorpora a
   `main`.
 - El workflow debe publicar archivos portables, instalador Windows, fuentes y
