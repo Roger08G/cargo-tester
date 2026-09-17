@@ -1,4 +1,4 @@
-<h1 align="center">Cargo Tester</h1>
+<h1 align="center">🦀 Cargo Tester</h1>
 
 <p align="center">
   Subcomando de Cargo para ejecutar tests de Rust con reportes estructurados y legibles.
